@@ -1,0 +1,78 @@
+# PR 마다 Trivy 로 Terraform 설정(misconfiguration)을 검사한다(#30).
+#
+# - AWS 자격 증명이 필요 없어 plan 워크플로와 나눴다. 포크 PR 에서도 검사는 돈다.
+# - 두 번 돈다
+#     ① 기록용: 모든 심각도 → SARIF → Code scanning(PR 「Files changed」 줄에 경고). 실패시키지 않는다
+#     ② 판정용: HIGH · CRITICAL 만, 있으면 실패
+#   한 번에 --severity HIGH,CRITICAL 로 돌리면 SARIF 에도 HIGH 이상만 남아 MEDIUM · LOW 가 안 보인다.
+# - 예외는 코드의 #trivy:ignore:<ID> 주석(근거와 함께, 예: #23 · #24).
+# - Trivy 는 Action 대신 바이너리를 판 고정 + 체크섬 확인으로 설치한다(보안 도구 Action 은 공급망 공격 대상이 되기 쉬움).
+
+name: security-scan
+
+on:
+  pull_request:
+    paths:
+      - "envs/**"
+      - "bootstrap/**"
+      - ".github/workflows/security-scan.yml"
+  # Code scanning 이 PR 결과를 main 기준과 비교하려면 main 분석이 있어야 한다.
+  push:
+    branches: [main]
+    paths:
+      - "envs/**"
+      - "bootstrap/**"
+      - ".github/workflows/security-scan.yml"
+
+permissions: {}
+
+concurrency:
+  group: security-scan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 판을 올릴 때는 릴리스의 trivy_<판>_checksums.txt 에서 Linux-64bit.tar.gz 줄을 함께 바꾼다.
+  TRIVY_VERSION: "0.76.2"
+  TRIVY_SHA256: "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf"
+
+jobs:
+  trivy-config:
+    name: trivy config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # SARIF 업로드 — 포크 PR 에서는 GitHub 가 주지 않으므로 업로드 단계를 건너뛴다
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy 설치(판 고정 · 체크섬 확인)
+        run: |
+          set -euo pipefail
+          tgz="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tgz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$tgz"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/trivy"
+          tar -xzf "$RUNNER_TEMP/$tgz" -C "$RUNNER_TEMP/trivy" trivy
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+
+      - name: ① 기록용 — 모든 심각도 → SARIF
+        run: |
+          trivy --version
+          trivy config --exit-code 0 --format sarif --output trivy-config.sarif .
+
+      - name: SARIF 업로드(Code scanning)
+        if: >-
+          github.event_name == 'push' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+      # 표는 로그에 남는다. 코드 줄 · 규칙 ID 뿐이라 공개 로그에 비밀 값은 없다.
+      - name: ② 판정용 — HIGH · CRITICAL 이 있으면 실패
+        run: trivy config --exit-code 1 --severity HIGH,CRITICAL --format table .
