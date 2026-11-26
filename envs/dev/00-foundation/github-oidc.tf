@@ -43,8 +43,10 @@ data "aws_iam_policy_document" "github_plan_trust" {
 }
 
 resource "aws_iam_role" "github_plan" {
-  name                 = "GitHubActionsPlan"
-  description          = "GitHub Actions PR plan 전용(읽기 + 상태 잠금 파일). apply 권한 없음"
+  name = "GitHubActionsPlan"
+  # GitHub Actions PR plan 전용(읽기 + 상태 잠금 파일). apply 권한 없음.
+  # IAM description 은 한글을 받지 않는다(허용 문자: 탭 · 줄바꿈 · ASCII · U+00A1~U+00FF, #18).
+  description          = "GitHub Actions PR plan only (read-only + state lock file). No apply permission."
   assume_role_policy   = data.aws_iam_policy_document.github_plan_trust.json
   max_session_duration = 3600
 }
