@@ -1,0 +1,134 @@
+# main 에 병합되면 바뀐 스택만 순서대로 apply 한다(#16, 설계 7.4 변경).
+#
+# - 대상은 envs/dev 의 00 · 10 · 20 · 30. bootstrap(상태 버킷) · 25-addons(클러스터 API) 는 사람이 한다.
+# - 순서는 번호순(00 → 10 → 20 → 30). 한 job 안에서 차례로 돌려 순서를 보장하고, 앞이 실패하면 멈춘다.
+# - AWS 인증은 OIDC → GitHubActionsApply(main 브랜치만 받을 수 있음, 00-foundation/github-oidc.tf).
+# - 공개 저장소라 plan · apply 전문은 로그에 남기지 않는다(파일로만 두고 실패 때 끝부분만).
+# - 병합 = AWS 변경이다. PR 의 plan 댓글을 보고 승인한다.
+
+name: terraform-apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "envs/dev/00-*/**"
+      - "envs/dev/10-*/**"
+      - "envs/dev/20-*/**"
+      - "envs/dev/30-*/**"
+
+permissions: {}
+
+# 비상 끄기와 같은 그룹 — apply 와 destroy 가 동시에 돌지 않게 한다.
+# 도는 중인 실행은 취소하지 않는다(중간에 끊기면 상태가 꼬인다). 뒤에 온 것은 기다린다.
+concurrency:
+  group: terraform-dev-aws
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.6"
+  AWS_REGION: ap-northeast-2
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+
+jobs:
+  apply:
+    name: apply (바뀐 스택)
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      id-token: write # OIDC 토큰
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # 이번 push 에서 바뀐 스택을 번호순으로 고른다.
+      - id: pick
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          all=$(find envs/dev -mindepth 1 -maxdepth 1 -type d -regex 'envs/dev/[0-3]0-[a-z0-9-]+' | sort)
+          # before 가 없으면(새 브랜치 등) 전부를 대상으로 한다. plan 이 변경 없음이면 apply 하지 않는다.
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            picked="$all"
+          else
+            changed=$(git diff --name-only "$BEFORE" "$AFTER")
+            # grep 에는 파이프 대신 <<< 로 넘긴다(pipefail 에서 파이프가 끊겨 스택이 빠지는 일을 막음).
+            picked=$(for s in $all; do grep -q "^$s/" <<< "$changed" && echo "$s" || true; done)
+          fi
+          echo "고른 스택:"; echo "$picked"
+          echo "stacks=$(echo $picked)" >> "$GITHUB_OUTPUT"
+
+      # 역할이 아직 없으면(처음 00-foundation 을 사람이 apply 하기 전) 실패 대신 건너뛴다.
+      - id: ready
+        env:
+          ROLE: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE" ]; then
+            echo "::warning::Secret AWS_APPLY_ROLE_ARN 이 없어 apply 를 건너뜁니다(00-foundation 을 먼저 사람이 apply)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.ready.outputs.ok == 'true' && steps.pick.outputs.stacks != ''
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - if: steps.ready.outputs.ok == 'true' && steps.pick.outputs.stacks != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gha-apply-${{ github.run_id }}
+          role-duration-seconds: 7200
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: apply
+        if: steps.ready.outputs.ok == 'true' && steps.pick.outputs.stacks != ''
+        env:
+          STACKS: ${{ steps.pick.outputs.stacks }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/backend.hcl" <<EOF
+          bucket       = "$TF_STATE_BUCKET"
+          region       = "$AWS_REGION"
+          encrypt      = true
+          use_lockfile = true
+          EOF
+
+          log="$RUNNER_TEMP/tf.log"
+          fail() { echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"; tail -n 40 "$log"; exit 1; }
+
+          { echo "### terraform apply"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
+
+          for s in $STACKS; do
+            echo "::group::$s"
+            terraform -chdir="$s" init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$log" 2>&1 || fail "$s" init
+
+            set +e
+            terraform -chdir="$s" plan -no-color -lock-timeout=120s -detailed-exitcode -out=tfplan > "$log" 2>&1
+            rc=$?
+            set -e
+            # 0 = 변경 없음, 2 = 변경 있음, 1 = 오류
+            [ "$rc" -eq 1 ] && fail "$s" plan
+            if [ "$rc" -eq 0 ]; then
+              echo "| \`$s\` | 변경 없음 |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::endgroup::"; continue
+            fi
+
+            # plan 에서 만든 파일을 그대로 적용한다(plan 과 apply 사이에 내용이 바뀌지 않게).
+            terraform -chdir="$s" apply -no-color -lock-timeout=120s tfplan > "$log" 2>&1 || fail "$s" apply
+            result=$(grep -E '^Apply complete!' "$log" || echo "적용 완료")
+            echo "| \`$s\` | ✅ $result |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$result"
+            echo "::endgroup::"
+          done

@@ -1,0 +1,105 @@
+# 비상 끄기 버튼 — 요금이 나가는 스택을 역순으로 destroy 한다(#16).
+#
+# - Actions 탭 → emergency-down → Run workflow(브랜치 main) → 입력란에 DOWN.
+# - 순서: 30-data → 20-cluster → 10-network. 상태가 비어 있는 스택은 건너뛴다.
+# - 00-foundation 은 지우지 않는다(OIDC 역할이 없어지면 다음 CI 가 AWS 에 로그인하지 못한다. 거의 무료).
+# - 승인 단계는 없다(사용자 결정). 대신 main 에서만, DOWN 을 정확히 입력해야 돈다.
+# - Argo CD 루트 Application(25-addons) 이 생긴 뒤에는 그것을 먼저 지워야 한다(ALB 등 클러스터가 만든 자원).
+#   그 단계가 오면 이 워크플로에 앞 단계를 추가한다.
+
+name: emergency-down
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "정말 끄려면 DOWN 을 입력"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: terraform-dev-aws
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.6"
+  AWS_REGION: ap-northeast-2
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+
+jobs:
+  down:
+    name: destroy 30 → 20 → 10
+    # GitHubActionsApply 역할은 main 에서만 받을 수 있다. 다른 브랜치로 누르면 여기서 멈춘다.
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'DOWN'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_ARN }}
+          role-session-name: gha-down-${{ github.run_id }}
+          role-duration-seconds: 7200
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: destroy
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/backend.hcl" <<EOF
+          bucket       = "$TF_STATE_BUCKET"
+          region       = "$AWS_REGION"
+          encrypt      = true
+          use_lockfile = true
+          EOF
+
+          log="$RUNNER_TEMP/tf.log"
+          fail() { echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"; tail -n 40 "$log"; exit 1; }
+
+          { echo "### emergency-down"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
+
+          for s in envs/dev/30-data envs/dev/20-cluster envs/dev/10-network; do
+            echo "::group::$s"
+            terraform -chdir="$s" init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$log" 2>&1 || fail "$s" init
+
+            # 관리하는 자원이 없으면 건너뛴다. 단, state list 자체가 실패하면(인증 · 잠금 · 백엔드 오류)
+            # 「자원 없음」으로 착각하지 않도록 실패로 멈춘다.
+            terraform -chdir="$s" state list > "$RUNNER_TEMP/state.txt" 2> "$log" || fail "$s" "state list"
+            if [ ! -s "$RUNNER_TEMP/state.txt" ]; then
+              echo "| \`$s\` | 자원 없음 — 건너뜀 |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::endgroup::"; continue
+            fi
+
+            terraform -chdir="$s" destroy -auto-approve -no-color -lock-timeout=120s > "$log" 2>&1 || fail "$s" destroy
+            result=$(grep -E '^Destroy complete!' "$log" || echo "삭제 완료")
+            echo "| \`$s\` | ✅ $result |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$result"
+            echo "::endgroup::"
+          done
+
+  # 입력이 틀렸거나 main 이 아니면 이유를 남긴다.
+  refused:
+    if: github.ref != 'refs/heads/main' || inputs.confirm != 'DOWN'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - run: |
+          echo "::error::실행 안 함 — main 브랜치에서, 입력란에 DOWN 을 정확히 넣어야 합니다."
+          exit 1
