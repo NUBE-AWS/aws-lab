@@ -39,6 +39,39 @@ resource "aws_s3_bucket_public_access_block" "tfstate" {
   restrict_public_buckets = true
 }
 
+# 전송 구간 암호화 강제(Security Hub S3.5) — HTTPS 가 아닌 요청은 모두 거부한다.
+# Deny 만 있는 정책이라 공개 차단(block_public_policy)과 충돌하지 않는다.
+data "aws_iam_policy_document" "tfstate" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.tfstate.arn,
+      "${aws_s3_bucket.tfstate.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "tfstate" {
+  bucket = aws_s3_bucket.tfstate.id
+  policy = data.aws_iam_policy_document.tfstate.json
+
+  # 공개 차단 설정이 먼저 적용된 뒤에 정책을 붙인다.
+  depends_on = [aws_s3_bucket_public_access_block.tfstate]
+}
+
 # 오래된 상태 판은 90일 뒤 정리(버전이 끝없이 쌓이지 않게).
 resource "aws_s3_bucket_lifecycle_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
