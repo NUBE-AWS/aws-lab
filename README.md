@@ -17,7 +17,7 @@
 | 디렉터리 | 상태 위치(key) | 담는 것 | 삭제 주기 |
 | :-- | :-- | :-- | :-- |
 | `bootstrap/` | 로컬(`bootstrap/terraform.tfstate`, Git 제외) | 상태 버킷 | 삭제하지 않음 |
-| `envs/dev/00-foundation/` | `dev/foundation/terraform.tfstate` | IAM 역할 · Route 53 영역 · ACM · ECR · Cognito · KMS · Budgets · GitHub OIDC 역할 | 유지(거의 무료) |
+| `envs/dev/00-foundation/` | `dev/foundation/terraform.tfstate` | Route 53 영역 · ACM · ECR · Cognito · KMS · Budgets · GitHub OIDC 역할 | 유지(거의 무료) |
 | `envs/dev/10-network/` | `dev/network/terraform.tfstate` | VPC · 서브넷 · NAT · 엔드포인트 | 작업 뒤 삭제 |
 | `envs/dev/20-cluster/` | `dev/cluster/terraform.tfstate` | EKS · 노드 그룹 · 애드온 · 액세스 항목 · Pod Identity 역할 | 작업 뒤 삭제 |
 | `envs/dev/30-data/` | `dev/data/terraform.tfstate` | RDS · DB 보안 그룹 | 작업 뒤 삭제 |
