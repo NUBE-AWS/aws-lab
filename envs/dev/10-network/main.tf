@@ -6,6 +6,10 @@ locals {
   azs  = ["ap-northeast-2a", "ap-northeast-2b", "ap-northeast-2c"]
 }
 
+# VPC Flow Logs 는 켜지 않는다(Trivy MEDIUM AVD-AWS-0178 예외, #22).
+# - 이상 통신 탐지는 GuardDuty(설계 5.4)가 맡는다. GuardDuty 는 Flow Logs 를 켜지 않아도 AWS 내부 흐름 데이터를 따로 분석한다.
+# - dev 는 작업 뒤 삭제하는 환경이라 수집 비용(GB당 약 0.25~0.50달러)을 아낀다. 통신 기록이 필요해지면 다시 검토한다.
+#trivy:ignore:AVD-AWS-0178
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 6.9"
