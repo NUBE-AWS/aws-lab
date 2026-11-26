@@ -12,36 +12,44 @@
 
 ## 구조
 
-| 디렉터리 | 하는 일 | 상태 저장 |
-| :-- | :-- | :-- |
-| `bootstrap/` | Terraform 상태를 담을 S3 버킷 하나를 만든다(버전 관리 · 암호화 · 공개 차단). 처음에 한 번만 | 로컬(`bootstrap/terraform.tfstate`, Git 제외) |
-| `envs/dev/` | 실제 학습 자원(VPC → EKS → …). 단계마다 여기에 더한다 | S3(`bootstrap`이 만든 버킷, `use_lockfile` 잠금) |
+상태 버킷 하나에 **스택마다 상태 파일을 따로** 둡니다. 스택은 따로 `init` · `plan` · `apply` 하므로, 한 스택의 실수가 다른 스택의 상태를 건드리지 않고, 두 사람이 서로 다른 스택을 동시에 작업할 수 있습니다(같은 스택은 `use_lockfile` 잠금으로 한 사람만).
 
-## 단계
+| 디렉터리 | 상태 위치(key) | 담는 것 | 삭제 주기 |
+| :-- | :-- | :-- | :-- |
+| `bootstrap/` | 로컬(`bootstrap/terraform.tfstate`, Git 제외) | 상태 버킷 | 삭제하지 않음 |
+| `envs/dev/00-foundation/` | `dev/foundation/terraform.tfstate` | Route 53 영역 · ACM · ECR · Cognito · KMS · Budgets · GitHub OIDC 역할 | 유지(거의 무료) |
+| `envs/dev/10-network/` | `dev/network/terraform.tfstate` | VPC · 서브넷 · NAT · 엔드포인트 | 작업 뒤 삭제 |
+| `envs/dev/20-cluster/` | `dev/cluster/terraform.tfstate` | EKS · 노드 그룹 · 애드온 · 액세스 항목 · Pod Identity 역할 | 작업 뒤 삭제 |
+| `envs/dev/30-data/` | `dev/data/terraform.tfstate` | RDS · DB 보안 그룹 | 작업 뒤 삭제 |
 
-| 단계 | 내용 | 켜 두면 드는 비용(대략) |
-| :-- | :-- | :-- |
-| 0 | 저장소 · 상태 버킷 | S3 몇 센트 |
-| 1 | VPC(AZ 2~3, 퍼블릭/프라이빗 서브넷, NAT) | NAT 게이트웨이 시간당 과금 |
-| 2 | EKS(관리형 노드 그룹, access entries, 애드온) | 컨트롤 플레인 시간당 약 0.10달러 + 노드 |
-| 3 | AWS Load Balancer Controller(ALB) · Route 53 · ACM | ALB 시간당 과금 |
-| 4 | RDS PostgreSQL + Secrets Manager + Pod Identity | RDS 인스턴스 |
-| 5 | 관측(CloudWatch Container Insights 또는 관리형 Prometheus) | 수집량 |
-| 6 | Karpenter · 스팟 · 비용 태그 분석 | — |
+- 적용은 번호순(00 → 10 → 20 → 30), 삭제는 역순입니다. 스택 사이의 값은 `terraform_remote_state`로 읽습니다.
+- 공통 백엔드 값은 `envs/dev/backend.hcl` 하나에 두고(Git 제외 — 버킷 이름에 계정 ID가 들어감), 상태 위치(key)는 스택마다 `versions.tf`에 고정합니다.
+- 이 계정에서는 AWS Organizations · IAM Identity Center(조직 인스턴스) · Control Tower를 켜지 않습니다. 켜는 순간 무료 플랜 크레딧이 끝납니다.
 
-비교 축: 같은 앱(예: NetBox)을 이 트랙(RDS)과 온프레미스(CNPG)에 올려 운영 방식의 차이를 기록합니다.
+비교 축: 같은 앱(NetBox)을 이 트랙(RDS)과 온프레미스(CNPG)에 올려 운영 방식의 차이를 기록합니다. 설계 근거는 nube_it `content/docs/k8s-aws/`입니다.
 
 ## 처음 한 번 (0단계)
 
 ```powershell
 $env:AWS_PROFILE = "<개인 프로필>"
-aws sts get-caller-identity
+aws sts get-caller-identity          # 작업 계정이 맞는지 확인
+
+# 1) 상태 버킷 — 계정에 한 번만
 cd bootstrap
 terraform init
-terraform apply
-# 예시 파일을 복사하고, 출력된 버킷 이름(state_bucket)을 bucket 에 적는다
-# backend.hcl 은 계정 ID가 들어가므로 Git에서 제외한다(.gitignore)
+terraform apply                      # 출력 state_bucket 값을 기억
+
+# 2) 공통 백엔드 값 — 사람마다 한 번
 cd ..\envs\dev
 Copy-Item backend.hcl.example backend.hcl
-terraform init -backend-config=backend.hcl
+# backend.hcl 의 bucket 을 state_bucket 값으로 바꾼다
+```
+
+## 스택 작업
+
+```powershell
+cd envs\dev\10-network               # 작업할 스택
+terraform init -backend-config=../backend.hcl
+terraform plan
+terraform apply
 ```
