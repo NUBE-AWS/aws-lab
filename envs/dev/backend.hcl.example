@@ -1,8 +1,12 @@
 # 예시 파일이다. backend.hcl 로 복사한 뒤 bootstrap 의 출력 state_bucket 값을 bucket 에 적는다.
 #   Copy-Item backend.hcl.example backend.hcl
 # backend.hcl 은 계정 ID가 들어가므로 커밋하지 않는다(.gitignore).
+#
+# 모든 dev 스택이 이 파일 하나를 함께 쓴다. 각 스택 폴더에서:
+#   terraform init -backend-config=../backend.hcl
+# key(상태 파일 위치)는 여기 두지 않는다 — 스택마다 versions.tf 의 backend 블록에 고정되어 있고,
+# 여기에 key 를 적으면 그 값이 스택의 key 를 덮어써 네 스택이 같은 상태 파일을 쓰게 된다.
 bucket       = "aws-lab-tfstate-<계정 ID>"
-key          = "envs/dev/terraform.tfstate"
 region       = "ap-northeast-2"
 encrypt      = true
 use_lockfile = true # S3 객체로 잠금(Terraform 1.10+) — DynamoDB 테이블이 필요 없다
