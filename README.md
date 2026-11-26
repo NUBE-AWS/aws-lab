@@ -53,3 +53,11 @@ terraform init -backend-config=../backend.hcl
 terraform plan
 terraform apply
 ```
+
+## 경보 메일 구독 (각자 한 번)
+
+`00-foundation`이 만든 SNS 주제 `aws-lab-alerts`로 CloudWatch 경보 · Budgets 알림이 옵니다. 메일 주소는 공개 저장소에 둘 수 없어 구독은 Terraform 밖에서 각자 만듭니다(#26).
+
+1. 콘솔 → SNS → 주제 → `aws-lab-alerts` → **구독 생성**
+2. 프로토콜 `이메일`, 엔드포인트에 본인 메일 → 생성
+3. 받은 메일의 **Confirm subscription** 링크를 누름(누르기 전에는 「확인 대기 중」이라 메일이 오지 않음)
