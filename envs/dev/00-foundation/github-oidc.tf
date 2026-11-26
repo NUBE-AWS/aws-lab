@@ -16,7 +16,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 # 누가 이 역할을 받을 수 있나: 이 저장소의 pull_request 실행만.
-# - sub 가 repo:<저장소>:pull_request 일 때만 허용한다. 다른 저장소, 브랜치 push,
+# - sub 가 <sub 접두어>:pull_request 일 때만 허용한다(접두어 형식은 variables.tf 참고). 다른 저장소, 브랜치 push,
 #   workflow_dispatch 로는 받을 수 없다.
 # - 포크에서 온 PR 은 GitHub 가 id-token 을 주지 않으므로 이 역할에 닿지 못한다.
 data "aws_iam_policy_document" "github_plan_trust" {
@@ -37,7 +37,7 @@ data "aws_iam_policy_document" "github_plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:pull_request"]
+      values   = ["${var.github_sub_prefix}:pull_request"]
     }
   }
 }
