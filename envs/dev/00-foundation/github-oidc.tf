@@ -1,5 +1,5 @@
 # GitHub Actions → AWS 인증(OIDC). 저장소에 접근 키를 두지 않는다(설계 7.4, #13).
-# CI 역할은 plan 전용이다 — apply 는 사람이 병합 뒤 main 에서 한다.
+# 역할 둘: PR 의 plan 전용(GitHubActionsPlan) · main 병합 뒤 apply · 비상 끄기용(GitHubActionsApply, #16).
 
 data "aws_caller_identity" "current" {}
 
@@ -71,4 +71,47 @@ resource "aws_iam_role_policy" "github_plan_state_lock" {
   name   = "state-lock-file"
   role   = aws_iam_role.github_plan.id
   policy = data.aws_iam_policy_document.github_plan_state_lock.json
+}
+
+# ── apply 역할(#16) ─────────────────────────────────────────────
+# 누가 받을 수 있나: 이 저장소의 main 브랜치에서 도는 실행만(push 뒤 자동 apply · 비상 끄기 버튼).
+# - sub 가 <sub 접두어>:ref:refs/heads/main 일 때만 허용한다. PR 실행 · 다른 브랜치는 받을 수 없다.
+# - main 은 룰셋으로 보호된다(PR 필수 · 다른 사람 승인). 그래서 「main 에 들어온 코드 = 두 사람이 본 코드」다.
+# 이 역할은 CI 가 스스로 만들 수 없으므로 처음 한 번은 사람이 로컬에서 apply 한다.
+data "aws_iam_policy_document" "github_apply_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["${var.github_sub_prefix}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_apply" {
+  name = "GitHubActionsApply"
+  # IAM description 은 한글을 받지 않는다(#18).
+  description          = "GitHub Actions apply/destroy from main branch only (00-30 stacks)."
+  assume_role_policy   = data.aws_iam_policy_document.github_apply_trust.json
+  max_session_duration = 7200 # 10 → 20 → 30 전체 생성 · 삭제(EKS · RDS)를 덮는다. 워크플로 job 제한(100분)보다 길게
+}
+
+# 권한은 AdministratorAccess — 스택들이 VPC · EKS · IAM 역할 · RDS 를 만들고 지운다.
+# 범위를 좁히는 대신 「누가 이 역할을 받나」(위 신뢰 정책 + main 보호)로 막는다.
+resource "aws_iam_role_policy_attachment" "github_apply_admin" {
+  role       = aws_iam_role.github_apply.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
