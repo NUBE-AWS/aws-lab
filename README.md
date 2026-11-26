@@ -39,7 +39,9 @@ aws sts get-caller-identity
 cd bootstrap
 terraform init
 terraform apply
-# 출력된 버킷 이름을 envs/dev/backend.hcl 의 bucket 에 적는다
+# 예시 파일을 복사하고, 출력된 버킷 이름(state_bucket)을 bucket 에 적는다
+# backend.hcl 은 계정 ID가 들어가므로 Git에서 제외한다(.gitignore)
 cd ..\envs\dev
+Copy-Item backend.hcl.example backend.hcl
 terraform init -backend-config=backend.hcl
 ```
