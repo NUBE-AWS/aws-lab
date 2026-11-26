@@ -21,6 +21,9 @@ resource "aws_s3_bucket_versioning" "tfstate" {
 }
 
 # 서버 쪽 암호화(SSE-S3). 상태 파일에는 자원 ID · 때로는 비밀 값이 들어간다.
+# CMK(SSE-KMS)는 키 비활성 · 삭제 시 상태를 못 읽는 위험과
+# CI 역할의 kms 권한 관리가 늘어 지금은 쓰지 않는다 — 30-data 단계에서 다시 검토.
+#trivy:ignore:AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
   rule {
