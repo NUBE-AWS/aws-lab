@@ -19,8 +19,11 @@ on:
 
 permissions: {}
 
+# apply 와 다른 그룹 — apply 대기열에 밀려 취소되지 않게 한다.
+# apply 와 같은 스택에 동시에 손대는 것은 Terraform 상태 잠금(use_lockfile)이 막는다.
+# 그래서 destroy 는 잠금을 오래 기다린다(-lock-timeout=30m, apply 중인 EKS 생성이 끝날 때까지).
 concurrency:
-  group: terraform-dev-aws
+  group: terraform-dev-down
   cancel-in-progress: false
 
 env:
@@ -86,7 +89,7 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
-            terraform -chdir="$s" destroy -auto-approve -no-color -lock-timeout=120s > "$log" 2>&1 || fail "$s" destroy
+            terraform -chdir="$s" destroy -auto-approve -no-color -lock-timeout=30m > "$log" 2>&1 || fail "$s" destroy
             result=$(grep -E '^Destroy complete!' "$log" || echo "삭제 완료")
             echo "| \`$s\` | ✅ $result |" >> "$GITHUB_STEP_SUMMARY"
             echo "$result"
