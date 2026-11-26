@@ -13,3 +13,9 @@ variable "tags" {
     ManagedBy   = "terraform"
   }
 }
+
+variable "github_repository" {
+  description = "CI 역할을 받을 수 있는 GitHub 저장소(<조직>/<저장소>)"
+  type        = string
+  default     = "NUBE-AWS/aws-lab"
+}
