@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json.schemastore.org/vsls",
+  "gitignore": "exclude",
+  "excludeFiles": [
+    "**/*.tfstate*",
+    "**/*.tfplan",
+    "**/backend.hcl",
+    "**/*.auto.tfvars",
+    "**/terraform.tfvars",
+    "CLAUDE.local.md"
+  ]
+}
