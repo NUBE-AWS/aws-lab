@@ -3,6 +3,11 @@
 
 data "aws_caller_identity" "current" {}
 
+# Trivy 예외 AWS-0089(버킷 접근 로그 꺼짐, LOW, #52 A안):
+# - 접근 로그를 켜려면 로그 전용 버킷이 하나 더 필요하고, 그 버킷도 같은 경고를 받는다.
+# - 이 버킷의 API 호출(버킷 설정 변경 등)은 이미 CloudTrail 관리 이벤트로 남는다(00-foundation/cloudtrail.tf).
+# - 객체 단위 기록(누가 상태 파일을 읽었나)이 필요해지면 접근 로그보다 CloudTrail S3 데이터 이벤트가 맞다(요금 있음).
+#trivy:ignore:AWS-0089
 resource "aws_s3_bucket" "tfstate" {
   bucket = "aws-lab-tfstate-${data.aws_caller_identity.current.account_id}"
 
