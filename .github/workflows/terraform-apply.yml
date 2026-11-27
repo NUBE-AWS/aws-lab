@@ -1,13 +1,20 @@
-# main 에 병합되면 바뀐 스택만 순서대로 apply 한다(#16, 설계 7.4 변경).
+# main 에 병합되면 스택을 순서대로 plan · apply 한다(#16 · #41, 설계 7.4).
 #
 # - 대상은 envs/dev 의 00 · 10 · 20 · 30. bootstrap(상태 버킷) · 25-addons(클러스터 API) 는 사람이 한다.
 # - 순서는 번호순(00 → 10 → 20 → 30). 한 job 안에서 차례로 돌려 순서를 보장하고, 앞이 실패하면 멈춘다.
 # - AWS 인증은 OIDC → GitHubActionsApply(main 브랜치만 받을 수 있음, 00-foundation/github-oidc.tf).
 # - 공개 저장소라 plan · apply 전문은 로그에 남기지 않는다(파일로만 두고 실패 때 끝부분만).
-# - 병합 = AWS 변경이다. PR 의 plan 댓글을 보고 승인한다.
-# - 수동 실행(Run workflow, 브랜치 main): 00~30 을 모두 plan 하고 변경이 있는 스택만 apply 한다.
-#   대기 중에 취소된 병합을 다시 돌리거나, 비상 끄기 뒤 main 코드대로 다시 켤 때 쓴다.
-#   주의: 20-cluster · 30-data 에 코드가 있으면 EKS · RDS 도 다시 만들어진다(요금 발생).
+#
+# 병합(push) — 켜져 있는 스택만 맞춘다(#41 결정):
+# - 00-foundation 은 매번 plan 한다(늘 켜 두는 스택, 겹친 병합으로 빠진 변경을 다시 잡음). 10 · 20 · 30 은 바뀐 경우만.
+# - 상태가 비어 있는 스택(지워진 상태)은 apply 하지 않고 건너뛴다. 매일 작업 뒤 10 · 20 · 30 을 지우므로,
+#   병합 한 번으로 클러스터 · RDS 가 다시 만들어져 요금이 나가는 일을 막는다. 처음 만드는 것도 수동 실행으로 한다.
+# - 00-foundation 이 AccessDenied 로 실패하면 사람 apply 가 밀린 것이다(#40, README 「CI로 적용되지 않는 변경」).
+#   그동안 00 을 매번 plan 하므로 뒤 스택(10 · 20 · 30)도 멈춘다 — 로컬에서 00 을 apply 하면 풀린다.
+#
+# 수동 실행(Run workflow, 브랜치 main) — 매일 아침 「켜기」:
+# - 00~30 을 모두 plan 하고 변경이 있는 스택을 apply 한다. 상태가 비어 있어도 만든다(요금 발생).
+# - 대기 중에 취소된 병합을 다시 돌릴 때도 쓴다.
 
 name: terraform-apply
 
@@ -52,36 +59,40 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # 이번 push 에서 바뀐 스택을 번호순으로 고른다. 수동 실행은 before 가 비어 있어 전부를 고른다.
+      # 대상 스택을 번호순으로 고른다.
+      # - 수동 실행: 전부.
+      # - push: 00-foundation(항상) + 바뀐 10 · 20 · 30. before 가 없으면(새 브랜치 등) 전부를 고르되,
+      #   지워진 스택은 아래 apply 단계에서 건너뛴다.
       - id: pick
         env:
+          EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         run: |
           set -euo pipefail
           all=$(find envs/dev -mindepth 1 -maxdepth 1 -type d -regex 'envs/dev/[0-3]0-[a-z0-9-]+' | sort)
-          # before 가 없으면(새 브랜치 등) 전부를 대상으로 한다. plan 이 변경 없음이면 apply 하지 않는다.
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+          if [ "$EVENT" != "push" ] || [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             picked="$all"
           else
             changed=$(git diff --name-only "$BEFORE" "$AFTER")
             # grep 에는 파이프 대신 <<< 로 넘긴다(pipefail 에서 파이프가 끊겨 스택이 빠지는 일을 막음).
-            picked=$(for s in $all; do grep -q "^$s/" <<< "$changed" && echo "$s" || true; done)
+            picked=$(for s in $all; do
+              if [ "$s" = "envs/dev/00-foundation" ] || grep -q "^$s/" <<< "$changed"; then echo "$s"; fi
+            done)
           fi
           echo "고른 스택:"; echo "$picked"
           echo "stacks=$(echo $picked)" >> "$GITHUB_OUTPUT"
 
-      # 역할이 아직 없으면(처음 00-foundation 을 사람이 apply 하기 전) 실패 대신 건너뛴다.
+      # apply 역할 Secret 이 없으면 실패로 드러낸다(#41). 00-foundation 을 처음 사람이 apply 한 뒤 넣는 값이다.
       - id: ready
         env:
           ROLE: ${{ secrets.AWS_APPLY_ROLE_ARN }}
         run: |
           if [ -z "$ROLE" ]; then
-            echo "::warning::Secret AWS_APPLY_ROLE_ARN 이 없어 apply 를 건너뜁니다(00-foundation 을 먼저 사람이 apply)."
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Secret AWS_APPLY_ROLE_ARN 이 없습니다. 00-foundation 출력 github_apply_role_arn 값을 저장소 Secret 에 넣습니다."
+            exit 1
           fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
 
       # EKS 공개 엔드포인트 허용 주소(#36). 값이 없으면 여기서는 넘어가고, 20-cluster 차례에 멈춘다.
       # GitHub 는 Secret 전체 문자열만 가린다. Terraform 출력에는 주소가 하나씩 나오므로 주소마다 가림을 등록한다.
@@ -124,6 +135,7 @@ jobs:
         if: steps.ready.outputs.ok == 'true' && steps.pick.outputs.stacks != ''
         env:
           STACKS: ${{ steps.pick.outputs.stacks }}
+          EVENT: ${{ github.event_name }}
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
           set -euo pipefail
@@ -135,17 +147,37 @@ jobs:
           EOF
 
           log="$RUNNER_TEMP/tf.log"
-          fail() { echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"; tail -n 40 "$log"; exit 1; }
+          fail() {
+            echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"
+            # 00 이 거부로 실패하면 사람 apply 가 밀린 것(#40). 뒤 스택도 이 때문에 멈춘다.
+            if [ "$1" = "envs/dev/00-foundation" ] && grep -q 'AccessDenied' "$log"; then
+              echo "> 00-foundation 이 \`AccessDenied\` 로 실패했습니다 — CI 로 적용되지 않는 변경(CI 역할 · 거부 문장 · CloudTrail · GuardDuty)이 main 에 있고 아직 사람이 apply 하지 않았습니다. 로컬에서 00-foundation 을 apply 하면 다음 실행부터 풀립니다(README 「CI로 적용되지 않는 변경」)." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            tail -n 40 "$log"; exit 1
+          }
 
-          { echo "### terraform apply"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### terraform apply ($EVENT)"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
 
           for s in $STACKS; do
             echo "::group::$s"
+            terraform -chdir="$s" init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$log" 2>&1 || fail "$s" init
+
+            # push 로는 지워진 스택을 만들지 않는다(#41). state list 자체가 실패하면(인증 · 잠금 · 백엔드 오류)
+            # 「비어 있음」으로 착각하지 않도록 실패로 멈춘다(emergency-down 과 같은 방식).
+            if [ "$EVENT" = "push" ]; then
+              terraform -chdir="$s" state list > "$RUNNER_TEMP/state.txt" 2> "$log" || fail "$s" "state list"
+              if [ ! -s "$RUNNER_TEMP/state.txt" ]; then
+                echo "| \`$s\` | ⏭️ 지워진 상태 — 건너뜀(켜려면 수동 실행) |" >> "$GITHUB_STEP_SUMMARY"
+                echo "지워진 상태 — 건너뜀"
+                echo "::endgroup::"; continue
+              fi
+            fi
+
+            # 허용 주소(#36)는 실제로 plan 할 때만 필요하다 — 지워진 20-cluster 를 건너뛸 때는 검사하지 않는다.
             if [ "$s" = "envs/dev/20-cluster" ] && [ -z "${TF_VAR_cluster_endpoint_public_access_cidrs:-}" ]; then
               echo "| \`$s\` | ❌ Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 없음(#36) |" >> "$GITHUB_STEP_SUMMARY"
               echo "::error::Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 가 없어 20-cluster 를 apply 할 수 없습니다(#36)."; exit 1
             fi
-            terraform -chdir="$s" init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$log" 2>&1 || fail "$s" init
 
             set +e
             terraform -chdir="$s" plan -no-color -lock-timeout=120s -detailed-exitcode -out=tfplan > "$log" 2>&1
