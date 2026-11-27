@@ -55,6 +55,10 @@ module "karpenter" {
   iam_role_use_name_prefix                  = false
   iam_role_override_assume_policy_documents = [data.aws_iam_policy_document.karpenter_controller_trust.json]
 
+  # 컨트롤러 정책이 관리형 정책 한도(6,144자)를 넘어 CreatePolicy 가 LimitExceeded 로 실패한다(#59).
+  # 역할의 인라인 정책(한도 10,240자)으로 만든다 — 모듈 변수 설명이 이 오류에 권하는 방법.
+  enable_inline_policy = true
+
   namespace       = local.karpenter_namespace
   service_account = local.karpenter_service_account
 
