@@ -45,5 +45,6 @@ variable "addon_versions" {
     coredns                = "v1.14.7-eksbuild.35"
     kube-proxy             = "v1.37.0-eksbuild.39"
     eks-pod-identity-agent = "v1.4.1-eksbuild.3"
+    aws-ebs-csi-driver     = "v1.68.1-eksbuild.1"
   }
 }

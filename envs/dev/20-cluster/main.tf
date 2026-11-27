@@ -1,5 +1,5 @@
 # 20-cluster — 작업 뒤 삭제: EKS · 시스템 노드 그룹 · 애드온 · Karpenter(AWS 쪽) (설계 3.2 · 3.3, #35)
-# 사람의 액세스 항목 · Pod Identity(EBS CSI 역할 등)는 손두영 님(설계 7.5, #50).
+# Karpenter(AWS 쪽)는 karpenter.tf, 사람의 액세스 항목은 access.tf, EBS CSI Pod Identity 역할은 ebs-csi.tf(설계 7.5, #50).
 
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
@@ -133,6 +133,27 @@ module "eks" {
       configuration_values = jsonencode({
         tolerations = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
       })
+    }
+    # PVC 용 EBS 볼륨(#50). 역할 · 신뢰 정책은 ebs-csi.tf. 노드가 뜬 뒤에 만든다(before_compute 없음).
+    aws-ebs-csi-driver = {
+      addon_version = var.addon_versions["aws-ebs-csi-driver"]
+      pod_identity_association = [{
+        role_arn        = aws_iam_role.ebs_csi.arn
+        service_account = local.ebs_csi_service_account
+      }]
+    }
+  }
+
+  # 사람의 액세스 항목 — 대상은 access.tf(IAM 그룹 aws-lab-admins 멤버, #50).
+  access_entries = {
+    for id, arn in local.cluster_admin_arns : "admin-${id}" => {
+      principal_arn = arn
+      policy_associations = {
+        cluster_admin = {
+          policy_arn   = "arn:${data.aws_partition.current.partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
     }
   }
 
