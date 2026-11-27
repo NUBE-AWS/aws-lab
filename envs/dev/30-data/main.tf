@@ -1,5 +1,5 @@
 # 30-data — 작업 뒤 삭제: RDS for PostgreSQL · DB 보안 그룹 · TLS 파라미터 그룹 (설계 6.1, 가이드 12장, #65)
-# 1단계: 다른 스택의 출력 읽기 · 2단계: TLS 파라미터 그룹 · 3단계: DB 보안 그룹. 인스턴스는 4단계에서 더한다.
+# 1단계: 다른 스택의 출력 읽기 · 2단계: TLS 파라미터 그룹 · 3단계: DB 보안 그룹 · 4단계: DB 인스턴스(출력은 outputs.tf).
 
 data "aws_caller_identity" "current" {}
 
@@ -90,4 +90,59 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_nodes" {
   from_port                    = 5432
   to_port                      = 5432
   description                  = "PostgreSQL from EKS nodes (design 6.1 and 5.1)"
+}
+
+# --- 4단계: DB 인스턴스 (설계 6.1 · 11장 「데이터」) ---
+# ⚠️ 켜 두면 요금: db.t4g.small 시간당 약 0.051달러 + gp3 20GB. 매일 emergency-down 이 30 부터 지운다.
+#
+# Trivy 예외(설계상 의도):
+# - AWS-0177 삭제 보호 꺼짐: 매일 지우는 스택(설계 6.1). 켜면 emergency-down 의 destroy 가 멈춘다
+# - AWS-0176 IAM DB 인증 꺼짐: 앱 계정은 비밀번호 + Secrets Manager · External Secrets 로 준다(설계 4.4)
+# - AWS-0133 Performance Insights 꺼짐: 경보는 최소로 둔다(설계 8장). 필요한 날 켤 수 있다(7일 보관은 무료)
+#trivy:ignore:AWS-0177
+#trivy:ignore:AWS-0176
+#trivy:ignore:AWS-0133
+resource "aws_db_instance" "postgres" {
+  identifier = var.identifier
+
+  # 판: 데이터 소스가 고른 「주 판의 최신」(2단계). 판은 Terraform 만 정한다 —
+  # AWS 가 유지 관리 시간에 부 판을 올리면 코드의 정확한 판과 어긋나므로 자동 올리기를 끈다(#65 결정 A).
+  # 매일 새로 만들어 그날의 최신 판을 받는다.
+  engine                     = "postgres"
+  engine_version             = data.aws_rds_engine_version.postgres.version_actual
+  auto_minor_version_upgrade = false
+
+  instance_class    = var.instance_class
+  allocated_storage = var.allocated_storage
+  storage_type      = "gp3"
+
+  # 저장 암호화: RDS 전용 고객 관리 키(00-foundation, #64). 비우면 AWS 관리 키로 조용히 만들어지고
+  # 만든 뒤에는 바꿀 수 없다(바꾸면 인스턴스 교체 = 데이터 소실). 원격 상태 출력이라 키가 없으면 plan 이 멈춘다.
+  storage_encrypted = true
+  kms_key_id        = local.rds_kms_key_arn
+
+  # 위치 · 접근: 인터넷 경로 없는 DB 서브넷, 공개 접근 끔, 노드에서 오는 5432 만(3단계), TLS 강제(2단계).
+  # Multi-AZ 는 평소 끈다(요금 2배) — 장애 조치 비교 시험(설계 9장) 때만 켠다.
+  db_subnet_group_name   = local.database_subnet_group_name
+  multi_az               = false
+  publicly_accessible    = false
+  vpc_security_group_ids = [aws_security_group.db.id]
+  parameter_group_name   = aws_db_parameter_group.tls.name
+  port                   = 5432
+
+  # 새로 만들 때만 사용자 이름을 준다. 스냅샷에서 복원하면 스냅샷의 사용자를 쓰므로 null 이어야 한다.
+  # 비밀번호는 RDS 가 Secrets Manager(rds!db-…)에 만들고 회전한다 — 코드 · 상태에 들어가지 않는다(설계 4.4).
+  username                    = var.snapshot_identifier == null ? var.master_username : null
+  manage_master_user_password = var.manage_master_user_password
+  snapshot_identifier         = var.snapshot_identifier
+
+  # 백업: 공급자 기본값은 0(백업 없음)이라 반드시 적는다. 자동 백업은 인스턴스가 있는 동안의 시점 복원 수단이다.
+  backup_retention_period = 7
+  copy_tags_to_snapshot   = true
+
+  # 삭제: 매일 지우는 스택. skip_final_snapshot 기본값 false 면 destroy 가 최종 스냅샷 이름을 요구하며 실패한다.
+  # 자동 백업을 남기지 않는 것도 기본값에 기대지 않고 적는다(남으면 삭제 뒤에도 저장 요금). 남길 데이터는 지우기 전 수동 스냅샷.
+  deletion_protection      = false
+  skip_final_snapshot      = true
+  delete_automated_backups = true
 }
