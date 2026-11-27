@@ -32,3 +32,8 @@ output "cluster_admins_group_name" {
   description = "EKS 클러스터 관리자 그룹 이름 — 20-cluster 가 멤버를 조회해 액세스 항목을 만든다(#50)"
   value       = aws_iam_group.cluster_admins.name
 }
+
+output "rds_kms_key_arn" {
+  description = "RDS 저장 암호화 키(alias/aws-lab-rds) — 30-data 가 terraform_remote_state 로 읽어 kms_key_id 로 넘긴다(이름을 바꾸지 말 것, #64)"
+  value       = aws_kms_key.rds.arn
+}
