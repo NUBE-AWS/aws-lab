@@ -42,7 +42,8 @@ resource "terraform_data" "nat_precondition" {
   }
 }
 
-# 시스템 노드가 pull-through cache 에서 처음 이미지를 받을 때 캐시 저장소를 만드는 권한(설계 6.4, #27).
+# 노드(시스템 · Karpenter)가 pull-through cache 에서 처음 이미지를 받을 때 캐시 저장소를 만드는 권한(설계 6.4, #27).
+# 접두어는 00-foundation 출력 cache_prefixes 를 그대로 쓴다 — 캐시 규칙을 더하면 이 권한도 함께 따라온다.
 data "aws_iam_policy_document" "ecr_pull_through_first_pull" {
   statement {
     sid    = "CreateCacheRepositoryOnFirstPull"
@@ -52,7 +53,7 @@ data "aws_iam_policy_document" "ecr_pull_through_first_pull" {
       "ecr:BatchImportUpstreamImage",
     ]
     resources = [
-      for p in var.ecr_pull_through_prefixes :
+      for p in local.foundation.cache_prefixes :
       "arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/${p}/*"
     ]
   }
@@ -64,6 +65,11 @@ resource "aws_iam_policy" "ecr_pull_through_first_pull" {
   policy      = data.aws_iam_policy_document.ecr_pull_through_first_pull.json
 }
 
+# Trivy 예외(설계상 의도):
+# - AWS-0040 공개 엔드포인트: 설계 3.2 — VPN 없이 접속하되 공개 쪽은 두 사람의 /32 만 허용(0.0.0.0/0 은 변수 검증이 거부)
+# - AWS-0104 노드 보안 그룹 전체 egress: 노드가 NAT 로 EKS · ECR · STS 와 pull-through 원본에 나가야 한다. 파드 단위 제한은 네트워크 정책(설계 5.1)
+#trivy:ignore:AWS-0040
+#trivy:ignore:AWS-0104
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "21.30.2"

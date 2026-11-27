@@ -47,14 +47,3 @@ variable "addon_versions" {
     eks-pod-identity-agent = "v1.4.1-eksbuild.3"
   }
 }
-
-variable "ecr_pull_through_prefixes" {
-  description = "ECR pull-through cache 저장소 접두어(설계 6.4, #27). 00-foundation 의 캐시 규칙 접두어와 같아야 한다"
-  type        = list(string)
-  default     = ["quay", "ecr-public", "k8s", "ghcr"]
-
-  validation {
-    condition     = length(var.ecr_pull_through_prefixes) > 0 && !contains(var.ecr_pull_through_prefixes, "*")
-    error_message = "캐시 접두어를 하나씩 적습니다. 빈 목록이나 * 는 안 됩니다."
-  }
-}
