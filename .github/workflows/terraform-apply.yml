@@ -12,8 +12,11 @@
 # - 00-foundation 이 AccessDenied 로 실패하면 사람 apply 가 밀린 것이다(#40, README 「CI로 적용되지 않는 변경」).
 #   그동안 00 을 매번 plan 하므로 뒤 스택(10 · 20 · 30)도 멈춘다 — 로컬에서 00 을 apply 하면 풀린다.
 #
-# 수동 실행(Run workflow, 브랜치 main) — 매일 아침 「켜기」:
+# 수동 실행(Run workflow, 브랜치 main, 입력란에 UP) — 매일 아침 「켜기」:
+# - emergency-down 의 DOWN 과 짝. UP 이 아니면 아무것도 하지 않고 이유만 남긴다(잘못 누르면 전부 만들어지므로).
 # - 00~30 을 모두 plan 하고 변경이 있는 스택을 apply 한다. 상태가 비어 있어도 만든다(요금 발생).
+# - 어느 스택이든 plan 에 destroy(교체 포함)가 1개 이상이면 그 스택에서 멈춘다. 아침 재생성은 스택이 비어 있어
+#   destroy 0 이 정상이다 — destroy 가 나오면 그사이 뭔가 섞였다는 뜻. 의도한 삭제 · 교체는 PR 병합(push)으로 적용한다.
 # - 대기 중에 취소된 병합을 다시 돌릴 때도 쓴다.
 
 name: terraform-apply
@@ -27,6 +30,11 @@ on:
       - "envs/dev/20-*/**"
       - "envs/dev/30-*/**"
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: "켜려면 UP 을 입력(10 · 20 · 30 이 만들어지고 요금이 나갑니다)"
+        required: true
+        type: string
 
 permissions: {}
 
@@ -45,9 +53,10 @@ env:
 
 jobs:
   apply:
-    name: apply (바뀐 스택)
+    name: apply
     # GitHubActionsApply 역할은 main 에서만 받을 수 있다. 다른 브랜치로 수동 실행하면 돌지 않는다.
-    if: github.ref == 'refs/heads/main'
+    # 수동 실행은 UP 을 정확히 넣었을 때만(아니면 아래 refused 가 이유를 남긴다).
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.confirm == 'UP')
     runs-on: ubuntu-latest
     timeout-minutes: 100
     permissions:
@@ -190,10 +199,35 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
+            # 바뀌는 개수(값은 적지 않음). 교체는 actions 가 ["delete","create"] · ["create","delete"] 라 add · destroy 양쪽에 잡힌다.
+            terraform -chdir="$s" show -json tfplan > "$RUNNER_TEMP/plan.json" 2> "$log" || fail "$s" "plan 읽기"
+            add=$(jq '[.resource_changes[]? | select(.change.actions | index("create"))] | length' "$RUNNER_TEMP/plan.json")
+            chg=$(jq '[.resource_changes[]? | select(.change.actions == ["update"])] | length' "$RUNNER_TEMP/plan.json")
+            del=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' "$RUNNER_TEMP/plan.json")
+            counts="add $add · change $chg · destroy $del"
+            echo "$counts"
+
+            # 수동 실행(아침 켜기)에서 destroy 가 나오면 멈춘다(#41). 의도한 삭제 · 교체는 PR 병합(push)으로 적용한다.
+            if [ "$EVENT" != "push" ] && [ "$del" -gt 0 ]; then
+              echo "| \`$s\` | ⛔ 수동 실행에 destroy $del개($counts) — 멈춤. 의도한 변경이면 PR 병합(push)으로 적용 |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::수동 실행 plan 에 destroy $del개가 있어 $s 에서 멈춥니다. 의도한 삭제 · 교체라면 PR 병합(push)으로 적용합니다."
+              exit 1
+            fi
+
             # plan 에서 만든 파일을 그대로 적용한다(plan 과 apply 사이에 내용이 바뀌지 않게).
             terraform -chdir="$s" apply -no-color -lock-timeout=120s tfplan > "$log" 2>&1 || fail "$s" apply
-            result=$(grep -E '^Apply complete!' "$log" || echo "적용 완료")
-            echo "| \`$s\` | ✅ $result |" >> "$GITHUB_STEP_SUMMARY"
-            echo "$result"
+            echo "| \`$s\` | ✅ $counts |" >> "$GITHUB_STEP_SUMMARY"
+            echo "적용 완료 — $counts"
             echo "::endgroup::"
           done
+
+  # 수동 실행 입력이 틀렸거나 main 이 아니면 이유를 남긴다(emergency-down 의 refused 와 같은 방식).
+  refused:
+    if: github.event_name == 'workflow_dispatch' && (github.ref != 'refs/heads/main' || inputs.confirm != 'UP')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - run: |
+          echo "::error::실행 안 함 — main 브랜치에서, 입력란에 UP 을 정확히 넣어야 합니다(10 · 20 · 30 이 만들어지고 요금이 나갑니다)."
+          exit 1
