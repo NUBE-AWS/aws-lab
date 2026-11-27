@@ -61,41 +61,46 @@ jobs:
           : > "$out"
           total=0
 
-          add() { # $1 = 제목, $2 = 줄 목록
-            local n
-            n=$(printf '%s' "$2" | grep -c . || true)
+          # add <제목> <명령...> — 명령을 실행해 결과 줄(자원 하나에 한 줄)을 모은다.
+          # 명령을 변수 대입으로 실행해야 조회가 실패했을 때 set -e 로 job 이 실패한다.
+          # (인자 안의 $(...) 로 쓰면 실패가 묻혀 「남은 자원 0개」로 잘못 보고된다 — 비용 경보에서 가장 나쁜 실패)
+          add() {
+            local title="$1" lines n
+            shift
+            lines=$("$@")
+            n=$(printf '%s' "$lines" | grep -c . || true)
             if [ "$n" -gt 0 ]; then
               total=$((total + n))
-              { echo "**$1** — $n개"; printf '%s\n' "$2" | sed 's/^/- /'; echo; } >> "$out"
+              { echo "**$title** — $n개"; printf '%s\n' "$lines" | sed 's/^/- /'; echo; } >> "$out"
             fi
           }
 
           add "EKS 클러스터(시간당 0.10달러)" \
-            "$(aws eks list-clusters --query 'clusters[]' --output text | tr '\t' '\n')"
+            aws eks list-clusters --query 'clusters[].[@]' --output text
 
           add "NAT Gateway(시간당 0.059달러 + 처리량)" \
-            "$(aws ec2 describe-nat-gateways --filter Name=state,Values=pending,available \
-                --query 'NatGateways[].[NatGatewayId, Tags[?Key==`Name`]|[0].Value || `-`]' --output text)"
+            aws ec2 describe-nat-gateways --filter Name=state,Values=pending,available \
+              --query 'NatGateways[].[NatGatewayId, Tags[?Key==`Name`]|[0].Value || `-`]' --output text
 
           add "실행 중인 EC2(노드 · Karpenter)" \
-            "$(aws ec2 describe-instances --filters Name=instance-state-name,Values=pending,running \
-                --query 'Reservations[].Instances[].[InstanceId, InstanceType, Tags[?Key==`Name`]|[0].Value || `-`]' --output text)"
+            aws ec2 describe-instances --filters Name=instance-state-name,Values=pending,running \
+              --query 'Reservations[].Instances[].[InstanceId, InstanceType, Tags[?Key==`Name`]|[0].Value || `-`]' --output text
 
           add "RDS 인스턴스(시간당 0.051달러~)" \
-            "$(aws rds describe-db-instances \
-                --query 'DBInstances[?DBInstanceStatus!=`deleting`].[DBInstanceIdentifier, DBInstanceClass, DBInstanceStatus]' --output text)"
+            aws rds describe-db-instances \
+              --query 'DBInstances[?DBInstanceStatus!=`deleting`].[DBInstanceIdentifier, DBInstanceClass, DBInstanceStatus]' --output text
 
           add "로드 밸런서(ALB 등)" \
-            "$(aws elbv2 describe-load-balancers --query 'LoadBalancers[].[LoadBalancerName, Type, State.Code]' --output text)"
+            aws elbv2 describe-load-balancers --query 'LoadBalancers[].[LoadBalancerName, Type, State.Code]' --output text
 
           add "연결 안 된 EBS 볼륨" \
-            "$(aws ec2 describe-volumes --filters Name=status,Values=available \
-                --query 'Volumes[].[VolumeId, join(``, [to_string(Size), `GiB`])]' --output text)"
+            aws ec2 describe-volumes --filters Name=status,Values=available \
+              --query 'Volumes[].[VolumeId, join(``, [to_string(Size), `GiB`])]' --output text
 
           # 공인 IPv4 는 연결 여부와 관계없이 시간당 과금. IP 주소는 적지 않는다.
           add "탄력적 IP(개당 시간당 0.005달러)" \
-            "$(aws ec2 describe-addresses \
-                --query 'Addresses[].[AllocationId, AssociationId || `연결 안 됨`, Tags[?Key==`Name`]|[0].Value || `-`]' --output text)"
+            aws ec2 describe-addresses \
+              --query 'Addresses[].[AllocationId, AssociationId || `연결 안 됨`, Tags[?Key==`Name`]|[0].Value || `-`]' --output text
 
           sed -i 's/\t/ · /g' "$out"
           echo "total=$total" >> "$GITHUB_OUTPUT"
