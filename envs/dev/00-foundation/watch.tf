@@ -8,9 +8,10 @@
 # | us-east-1 · us-east-2 · us-west-2 · eu-north-1 · ap-southeast-2 | login_rules(모듈) | 콘솔 로그인은 주체 · 경로에 따라 이 중 한 곳에 기록된다 |
 # | 서울                         | received(위 두 묶음의 패턴) · seoul_rules · GuardDuty | 넘어온 이벤트 + 서울 자체 이벤트, 알림 주제는 서울에만 |
 #
-# 서울 밖 규칙은 서울 기본 버스로 넘기고(전달 역할), 서울 규칙이 SNS 로 보낸다(주제 정책 — alerts.tf).
-# 가이드는 SNS 발행도 실행 역할로 두었지만, 「역할만으로 발행되는지 확정 못 함」이라 적혀 있어
-# AWS 문서가 SNS 대상에 요구하는 방식(주제 정책)으로 바꿨다. 역할은 전달용 하나만 있다.
+# 서울 밖 규칙은 서울 기본 버스로 넘기고(전달 역할), 서울 규칙이 SNS 로 보낸다(발행 역할).
+# 발행은 주제 정책에 events.amazonaws.com 을 열지 않고 규칙 대상의 실행 역할로 한다(설계 5.5).
+# 역할만으로 발행되는지는 확정하지 못해(가이드 9.7) 적용 뒤 경보 시험으로 확인하고,
+# 오지 않으면 주제 정책에 조건(aws:SourceArn · aws:SourceAccount)을 붙인 허용을 더한다(설계 10장).
 #
 # state: CloudTrail 관리 이벤트(API 호출 · 콘솔 로그인)를 받는 규칙은 ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS
 # (읽기 전용 이벤트까지 받음 — 루트의 조회 호출도 알림). GuardDuty 결과는 CloudTrail 이벤트가 아니라 ENABLED.
@@ -219,6 +220,51 @@ resource "aws_iam_role_policy" "eventbridge_forward" {
   policy = data.aws_iam_policy_document.eventbridge_forward.json
 }
 
+# ── 발행 역할: 알림 주제 sns:Publish 하나만 ──────────────────────
+# 신뢰는 서울의 SNS 대상 규칙 ARN + 이 계정으로 제한.
+
+data "aws_iam_policy_document" "eventbridge_sns_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:SourceArn"
+      values = concat(
+        [for r in aws_cloudwatch_event_rule.received : r.arn],
+        [for r in aws_cloudwatch_event_rule.seoul : r.arn],
+        [aws_cloudwatch_event_rule.guardduty_finding.arn],
+      )
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "eventbridge_sns" {
+  name               = "aws-lab-eventbridge-sns"
+  assume_role_policy = data.aws_iam_policy_document.eventbridge_sns_assume.json
+}
+
+data "aws_iam_policy_document" "eventbridge_sns" {
+  statement {
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.alerts.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "eventbridge_sns" {
+  name   = "publish-alerts-topic"
+  role   = aws_iam_role.eventbridge_sns.id
+  policy = data.aws_iam_policy_document.eventbridge_sns.json
+}
+
 # ── 서울: 수신 규칙 · 서울 규칙 → SNS ──────────────────────────────
 
 resource "aws_cloudwatch_event_rule" "received" {
@@ -236,6 +282,7 @@ resource "aws_cloudwatch_event_target" "received" {
   rule      = aws_cloudwatch_event_rule.received[each.key].name
   target_id = "alerts-topic"
   arn       = aws_sns_topic.alerts.arn
+  role_arn  = aws_iam_role.eventbridge_sns.arn
 }
 
 resource "aws_cloudwatch_event_rule" "seoul" {
@@ -253,6 +300,7 @@ resource "aws_cloudwatch_event_target" "seoul" {
   rule      = aws_cloudwatch_event_rule.seoul[each.key].name
   target_id = "alerts-topic"
   arn       = aws_sns_topic.alerts.arn
+  role_arn  = aws_iam_role.eventbridge_sns.arn
 }
 
 # ── 서울: GuardDuty 결과(심각도 4 이상 = Medium · High · Critical) → SNS (#44 문진중 님 추가 요청) ──
@@ -274,4 +322,5 @@ resource "aws_cloudwatch_event_target" "guardduty_finding" {
   rule      = aws_cloudwatch_event_rule.guardduty_finding.name
   target_id = "alerts-topic"
   arn       = aws_sns_topic.alerts.arn
+  role_arn  = aws_iam_role.eventbridge_sns.arn
 }
