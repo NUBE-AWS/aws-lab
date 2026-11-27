@@ -19,13 +19,14 @@ variable "cache_prefixes" {
   }
 }
 
-# ghcr.io 규칙은 비밀에 값이 들어간 뒤에 켠다(#27 PR ②).
+# ghcr.io 규칙은 비밀에 값이 들어간 뒤에 켠다 — 11-27 값 입력 뒤 켬(#27 PR ②).
 # 값이 없는 비밀을 가리키는 규칙의 생성이 거부되는지 문서로 확인하지 못해 분리했다.
-# 켤 때는 명령줄 -var 가 아니라 이 기본값을 바꾸는 PR 로 한다 — -var 로만 주면 다음 자동 apply 에서 규칙이 지워진다.
+# 켜고 끄는 것은 명령줄 -var 가 아니라 이 기본값을 바꾸는 PR 로 한다 — -var 로만 주면 다음 자동 apply 에서 되돌아간다.
+# 토큰을 바꿀 때(만료 등)는 규칙을 끌 필요 없이 비밀 값만 사람이 바꾼다.
 variable "enable_ghcr_rule" {
   description = "Create the pull-through cache rule for ghcr.io. Turn on only after a person has put the credentials into the secret."
   type        = bool
-  default     = false
+  default     = true
 }
 
 resource "aws_ecr_pull_through_cache_rule" "public" {
