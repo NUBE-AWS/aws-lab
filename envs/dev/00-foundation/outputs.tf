@@ -22,3 +22,8 @@ output "github_nightly_role_arn" {
   description = "저장소 Secret AWS_NIGHTLY_ROLE_ARN 에 넣을 값(야간 점검 워크플로가 수임, #28)"
   value       = aws_iam_role.github_nightly.arn
 }
+
+output "cache_prefixes" {
+  description = "쓰는 중인 ECR pull-through cache 접두어 — 20-cluster 노드 역할 권한(repository/<접두어>/*) · 차트 values 와 같아야 한다(#27)"
+  value       = concat(keys(var.cache_prefixes), var.enable_ghcr_rule ? ["ghcr"] : [])
+}

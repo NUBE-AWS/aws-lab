@@ -69,3 +69,16 @@ terraform apply
 - 지우는 것을 잊었다면: 설계 8.3 순서(클러스터 자원 정리 → `25` → `30` → `20` → `10`)로 정리
 - 일부러 켜 둔 것이면: 이유를 댓글로 남기고 이슈를 닫음
 - 손으로 돌려 보기: Actions → `nightly-check` → **Run workflow**
+
+## ECR 캐시 저장소 정리 (#27)
+
+외부 이미지는 ECR pull-through cache로 받습니다. 캐시가 이미지를 처음 받을 때 만드는 저장소(`quay/…` · `ecr-public/…` · `k8s/…` · `ghcr/…`)는 **Terraform 상태 밖**이라 `00-foundation`을 지워도 남습니다. 저장 요금(GB당 월 0.10달러)이 들므로, 정리할 때는 사람이 지웁니다.
+
+```powershell
+# 캐시가 만든 저장소 목록
+aws ecr describe-repositories --query "repositories[?starts_with(repositoryName, 'quay/') || starts_with(repositoryName, 'ecr-public/') || starts_with(repositoryName, 'k8s/') || starts_with(repositoryName, 'ghcr/')].repositoryName" --output text
+# 하나 지우기(이미지까지)
+aws ecr delete-repository --repository-name <이름> --force
+```
+
+평소에는 지울 필요가 없습니다. 수명 주기(최근 5개 유지)가 저장소마다 오래된 이미지를 지웁니다.
