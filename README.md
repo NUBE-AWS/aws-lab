@@ -54,6 +54,21 @@ terraform plan
 terraform apply
 ```
 
+## CI로 적용되지 않는 변경 (#40)
+
+CI 역할에는 명시적 거부가 붙어 있습니다(`00-foundation/ci-deny.tf`). 아래를 바꾸는 PR은 병합 뒤 자동 apply가 **`AccessDenied`로 실패**하므로, 병합한 뒤 **사람이 로컬에서 `00-foundation`을 apply**합니다.
+
+| 바꾸는 것 | 파일 |
+|---|---|
+| plan · apply 역할(신뢰 정책 · 인라인 정책 · 정책 연결 · 삭제), OIDC 공급자 | `github-oidc.tf` |
+| 거부 문장 자체 | `ci-deny.tf` |
+| CloudTrail 추적 설정 · 중지 · 삭제 | `cloudtrail.tf` |
+| GuardDuty 탐지기 · 기능 켜고 끄기 | `guardduty.tf` |
+
+- PR 본문에 「사람 apply 필요」를 적어 두고, 병합한 사람이 바로 로컬에서 apply합니다.
+- 자동 apply가 실패해도 그 스택의 나머지 변경은 사람이 apply할 때 함께 적용됩니다.
+- PR plan(plan 역할)은 SSM 파라미터 값 · Secrets Manager 값을 읽지 못합니다. 비밀 값을 읽는 Terraform 자원(`aws_secretsmanager_secret_version` 데이터 등)을 더하면 PR plan이 실패합니다.
+
 ## 경보 메일 구독 (각자 한 번)
 
 `00-foundation`이 만든 SNS 주제 `aws-lab-alerts`로 CloudWatch 경보 · Budgets 알림이 옵니다. 메일 주소는 공개 저장소에 둘 수 없어 구독은 Terraform 밖에서 각자 만듭니다(#26).
