@@ -47,3 +47,18 @@ output "hosted_zone_id" {
   description = "aws.nube.it.kr 영역 ID — ACM DNS 검증 레코드와 20-cluster external-dns 역할이 읽는다(#44)"
   value       = aws_route53_zone.aws.zone_id
 }
+
+output "cognito_user_pool_arn" {
+  description = "Cognito 사용자 풀 ARN — ALB 인증 동작에 쓴다. 25-addons 가 읽는다(#44)"
+  value       = aws_cognito_user_pool.apps.arn
+}
+
+output "cognito_client_id" {
+  description = "ALB 앱 클라이언트 ID(비밀 아님). 클라이언트 비밀은 출력하지 않는다. 25-addons 가 읽는다(#44)"
+  value       = aws_cognito_user_pool_client.alb.id
+}
+
+output "cognito_domain" {
+  description = "Cognito 사용자 풀 도메인 접두어 — 25-addons 가 읽는다(#44)"
+  value       = aws_cognito_user_pool_domain.apps.domain
+}
