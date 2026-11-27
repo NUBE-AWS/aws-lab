@@ -37,3 +37,13 @@ output "rds_kms_key_arn" {
   description = "RDS 저장 암호화 키(alias/aws-lab-rds) — 30-data 가 terraform_remote_state 로 읽어 kms_key_id 로 넘긴다(이름을 바꾸지 말 것, #64)"
   value       = aws_kms_key.rds.arn
 }
+
+output "name_servers" {
+  description = "aws.nube.it.kr 영역의 네임서버 4개 — ns1 의 nube.it.kr 영역에 aws NS 레코드로 넣는다(#44). 이슈 · PR 에 붙이지 않음"
+  value       = aws_route53_zone.aws.name_servers
+}
+
+output "hosted_zone_id" {
+  description = "aws.nube.it.kr 영역 ID — ACM DNS 검증 레코드와 20-cluster external-dns 역할이 읽는다(#44)"
+  value       = aws_route53_zone.aws.zone_id
+}
