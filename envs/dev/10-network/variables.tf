@@ -11,9 +11,9 @@ variable "cluster_name" {
 }
 
 variable "enable_nat_gateway" {
-  description = "NAT 게이트웨이를 켤지. 켜 두면 시간당 요금이 나가므로 클러스터 작업할 때만 true 로 apply 하고, 끝나면 false 로 되돌린다"
+  description = "NAT 게이트웨이를 켤지. 스택을 매일 만들고 지우므로 기본으로 켠다(끄는 것은 emergency-down 이 10-network 를 지울 때, #54). 클러스터 없이 네트워크만 오래 둘 때만 false"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "tags" {
