@@ -18,6 +18,20 @@ EKS 클러스터 · 시스템 노드 그룹 · 애드온 · Karpenter(AWS 쪽). 
 cluster_endpoint_public_access_cidrs = ["<공인 IP>/32"]
 ```
 
+## 켠 뒤: 접속 · 확인
+
+수동 실행(`UP`)이 끝나면(약 15~20분) 각자 PC에서 kubeconfig 를 받는다. `aws login` 으로 MFA 세션이어야 한다(그룹 `aws-lab-admins` 의 MFA 거부 정책).
+
+```powershell
+aws eks update-kubeconfig --region ap-northeast-2 --name aws-lab-dev
+kubectl get nodes -L node-role                 # 시스템 노드 2대 Ready, node-role=system
+kubectl get pods -n kube-system -o wide        # coredns · ebs-csi-controller 가 시스템 노드에 Running
+```
+
+- `kubectl` 이 `Unauthorized` 면: 자기 사용자가 `aws-lab-admins` 에 들어 있는지, 들어간 뒤 클러스터를 새로 켰는지 확인한다(액세스 항목은 apply 때 만들어진다).
+- 아침 켜기(`UP`)와 `emergency-down`(`DOWN`)은 겹쳐 돌리지 않는다. 대기열이 달라 상태 잠금을 두고 겨룬다.
+- 클러스터는 매번 새로 만들어지므로 kubeconfig 의 인증서 · 주소도 바뀐다. 켤 때마다 `update-kubeconfig` 를 다시 한다.
+
 ## 클러스터 관리자 추가 · 제거(#50)
 
 1. 콘솔: IAM → 사용자 그룹 → `aws-lab-admins` → 사용자 추가 · 제거
