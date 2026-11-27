@@ -10,7 +10,7 @@
 #   gate 판정: fmt · 바뀐 스택 job 이 성공 아니면 실패 / 바뀐 스택이 없으면 통과 / 있는데 plan 이 성공 아니면 실패.
 #   스택이 바뀐 포크 PR 은 plan 을 건너뛰므로 gate 가 실패한다 — 병합 = 자동 apply 라 plan 으로 검증하지 못한 변경은 막는다.
 # - 20 · 30 스택의 plan 은 10-network 출력을 읽는다. 10-network 가 지워진 시간(작업 뒤)에는 plan 이 실패하므로,
-#   리뷰 · 승인은 언제든 하고 다음 아침 켜기(UP) 뒤 plan job 을 Re-run 해 통과하면 병합한다(#34 결정 A).
+#   리뷰 · 승인은 언제든 하고 다음 아침 켜기(UP) 뒤 「Re-run failed jobs」(plan · gate 함께)로 통과하면 병합한다(#34 결정 A).
 
 name: terraform-plan
 
@@ -299,7 +299,7 @@ jobs:
           if [ "$CHANGES" != "success" ]; then echo "::error::바뀐 스택 고르기가 성공이 아닙니다($CHANGES)."; exit 1; fi
           if [ "$STACKS" = "[]" ]; then echo "바뀐 스택 없음 — 통과"; exit 0; fi
           if [ "$PLAN" != "success" ]; then
-            echo "::error::바뀐 스택이 있는데 plan 이 성공이 아닙니다($PLAN). 포크 PR 이면 plan 을 건너뛰므로 실패가 정상입니다. 20 · 30 스택이면 10-network 가 켜진 뒤(아침 UP) plan 을 Re-run 합니다."
+            echo "::error::바뀐 스택이 있는데 plan 이 성공이 아닙니다($PLAN). 포크 PR 이면 plan 을 건너뛰므로 실패가 정상입니다. 20 · 30 스택이면 10-network 가 켜진 뒤(아침 UP) 「Re-run failed jobs」 합니다."
             exit 1
           fi
           echo "plan 성공 — 통과"
