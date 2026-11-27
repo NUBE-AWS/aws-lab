@@ -27,3 +27,8 @@ output "cache_prefixes" {
   description = "쓰는 중인 ECR pull-through cache 접두어 — 20-cluster 노드 역할 권한(repository/<접두어>/*) · 차트 values 와 같아야 한다(#27)"
   value       = concat(keys(var.cache_prefixes), var.enable_ghcr_rule ? ["ghcr"] : [])
 }
+
+output "cluster_admins_group_name" {
+  description = "EKS 클러스터 관리자 그룹 이름 — 20-cluster 가 멤버를 조회해 액세스 항목을 만든다(#50)"
+  value       = aws_iam_group.cluster_admins.name
+}
