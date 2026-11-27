@@ -54,6 +54,18 @@ terraform plan
 terraform apply
 ```
 
+## 매일 켜기 · 끄기 (#41)
+
+10 · 20 · 30은 매일 켜고 작업이 끝나면 매일 지웁니다(00-foundation은 상시).
+
+| 언제 | 동작 | 비고 |
+|---|---|---|
+| 아침 켜기 | Actions → `terraform-apply` → Run workflow(main), 입력 `UP` | 00~30 plan → apply. plan에 destroy(교체 포함)가 있으면 그 스택에서 멈춤 |
+| 작업 뒤 끄기 | Actions → `emergency-down` → Run workflow(main), 입력 `DOWN` | 30 → 20 → 10 삭제. 그 전에 PVC 삭제(20-cluster README) |
+
+- **PR 병합(push)으로는 지워진 스택을 만들지 않습니다.** 병합 때는 00-foundation과, 바뀐 스택 중 **켜져 있는 것만** 맞춥니다. 지워진 스택은 「⏭️ 지워진 상태 — 건너뜀」으로 남고 다음 아침 켜기 때 반영됩니다.
+- 수동 실행에서 destroy 때문에 멈췄다면: 의도한 삭제 · 교체인지 확인하고, 의도한 것이면 스택이 켜져 있을 때 PR 병합(push)으로 적용합니다.
+
 ## CI로 적용되지 않는 변경 (#40)
 
 CI 역할에는 명시적 거부가 붙어 있습니다(`00-foundation/ci-deny.tf`). 아래를 바꾸는 PR은 병합 뒤 자동 apply가 **`AccessDenied`로 실패**하므로, 병합한 뒤 **사람이 로컬에서 `00-foundation`을 apply**합니다.
