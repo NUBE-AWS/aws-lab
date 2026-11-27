@@ -17,3 +17,8 @@ output "alerts_topic_arn" {
   description = "경보 SNS 주제 — CloudWatch 경보 · Budgets 가 여기로 보낸다"
   value       = aws_sns_topic.alerts.arn
 }
+
+output "github_nightly_role_arn" {
+  description = "저장소 Secret AWS_NIGHTLY_ROLE_ARN 에 넣을 값(야간 점검 워크플로가 수임, #28)"
+  value       = aws_iam_role.github_nightly.arn
+}
