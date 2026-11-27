@@ -118,6 +118,23 @@ CI 역할에는 명시적 거부가 붙어 있습니다(`00-foundation/ci-deny.t
 - 일부러 켜 둔 것이면: 이유를 댓글로 남기고 이슈를 닫음
 - 손으로 돌려 보기: Actions → `nightly-check` → **Run workflow**
 
+## 감시 알림 메일이 오면 (#44)
+
+`00-foundation/watch.tf`의 EventBridge 규칙이 위험한 관리 작업과 GuardDuty 결과(심각도 4 이상)를 `aws-lab-alerts`로 보냅니다. 막지는 않고 알리기만 합니다. 메일 본문은 이벤트 JSON이며, 제목 줄의 규칙 이름(`aws-lab-<이름>`)으로 종류를 압니다.
+
+| 규칙 | 언제 |
+|---|---|
+| `root-activity` · `root-console-login` | 루트 사용자의 API 호출 · 콘솔 로그인 |
+| `console-login-no-mfa` | MFA 없는 콘솔 로그인 |
+| `iam-credential-create` | IAM 사용자 · 접근 키 · 로그인 프로필 생성 |
+| `ci-role-change` · `oidc-provider-change` | `GitHubActions*` 역할 · OIDC 공급자 변경 |
+| `cloudtrail-stop-delete` · `log-bucket-policy` | CloudTrail 중지 · 삭제 · 설정 변경, 로그 버킷 정책 변경 |
+| `guardduty-disable` · `kms-key-disable` | GuardDuty 탐지기 변경 · 삭제, KMS 키 비활성화 · 삭제 예약 |
+| `guardduty-finding` | GuardDuty 결과(Medium 이상) |
+
+- 본인이나 동료가 한 작업이면(예: 사람 apply로 `ci-deny.tf` 변경) 넘어갑니다. 아무도 하지 않은 작업이면 CloudTrail 이벤트 기록에서 주체 · 시각 · 원본 IP를 보고 이슈로 남깁니다.
+- `guardduty-disable`은 기능을 켜는 호출에도, `kms-key-disable`은 계정의 모든 키에도 맞습니다.
+
 ## ECR 캐시 저장소 정리 (#27)
 
 외부 이미지는 ECR pull-through cache로 받습니다. 캐시가 이미지를 처음 받을 때 만드는 저장소(`quay/…` · `ecr-public/…` · `k8s/…` · `ghcr/…`)는 **Terraform 상태 밖**이라 `00-foundation`을 지워도 남습니다. 저장 요금(GB당 월 0.10달러)이 들므로, 정리할 때는 사람이 지웁니다.
