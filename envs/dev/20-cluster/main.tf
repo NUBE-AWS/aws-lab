@@ -1,5 +1,5 @@
-# 20-cluster — 작업 뒤 삭제: EKS · 시스템 노드 그룹 · 애드온 (설계 3.2 · 3.3, #35)
-# Karpenter(AWS 쪽)는 다음 PR, 사람의 액세스 항목 · Pod Identity(EBS CSI 역할 등)는 손두영 님(설계 7.5).
+# 20-cluster — 작업 뒤 삭제: EKS · 시스템 노드 그룹 · 애드온 · Karpenter(AWS 쪽) (설계 3.2 · 3.3, #35)
+# 사람의 액세스 항목 · Pod Identity(EBS CSI 역할 등)는 손두영 님(설계 7.5, #50).
 
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
@@ -68,8 +68,10 @@ resource "aws_iam_policy" "ecr_pull_through_first_pull" {
 # Trivy 예외(설계상 의도):
 # - AWS-0040 공개 엔드포인트: 설계 3.2 — VPN 없이 접속하되 공개 쪽은 두 사람의 /32 만 허용(0.0.0.0/0 은 변수 검증이 거부)
 # - AWS-0104 노드 보안 그룹 전체 egress: 노드가 NAT 로 EKS · ECR · STS 와 pull-through 원본에 나가야 한다. 파드 단위 제한은 네트워크 정책(설계 5.1)
+# - AWS-0038 api · controllerManager · scheduler 로그 꺼짐: 설계 3.2 — 감사에 필요한 audit · authenticator 만 남긴다(CloudWatch 수집 요금)
 #trivy:ignore:AWS-0040
 #trivy:ignore:AWS-0104
+#trivy:ignore:AWS-0038
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "21.30.2"

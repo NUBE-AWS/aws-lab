@@ -41,6 +41,9 @@ locals {
   karpenter_service_account = "karpenter"
 }
 
+# Trivy 예외(오탐): AWS-0342 iam:PassRole — 모듈 정책 AllowPassingInstanceRole 은 대상이 노드 역할 하나이고
+# iam:PassedToService = ec2.amazonaws.com 조건이 있다. 정적 검사가 대상 ARN 을 풀지 못해 경고한다.
+#trivy:ignore:AWS-0342
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
   version = "21.30.2"
