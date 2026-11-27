@@ -57,6 +57,28 @@ data "aws_iam_policy_document" "alerts" {
       values   = [local.account_id]
     }
   }
+
+  # EventBridge 감시 규칙 · GuardDuty 결과 규칙(watch.tf, #44 PR 4)이 발행할 수 있게.
+  # 서울의 aws-lab-* 규칙만(이름 접두어) + 이 계정. 규칙 ARN 을 하나씩 나열하지 않아 규칙을 더해도 이 정책은 그대로다.
+  statement {
+    sid       = "AllowEventBridgeRulePublish"
+    actions   = ["SNS:Publish"]
+    resources = [aws_sns_topic.alerts.arn]
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:events:${var.region}:${local.account_id}:rule/aws-lab-*"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
 }
 
 resource "aws_sns_topic_policy" "alerts" {
