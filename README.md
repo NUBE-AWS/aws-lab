@@ -77,7 +77,7 @@ terraform apply
 | `gate` | `terraform-plan` | fmt 성공, 바뀐 스택이 없거나 바뀐 스택의 plan이 모두 성공(스택이 바뀐 포크 PR은 plan을 건너뛰므로 실패) |
 | `trivy config` | `security-scan` | HIGH · CRITICAL 설정 경고 없음 |
 
-룰셋 설정(코드에 남지 않으므로 바꾸면 #34에 기록):
+룰셋 설정(코드에 남지 않으므로 바꾸면 #34에 기록, 11-27 설정):
 
 | 설정 | 값 | 이유 |
 |---|---|---|
