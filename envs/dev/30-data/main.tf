@@ -1,5 +1,5 @@
 # 30-data — 작업 뒤 삭제: RDS for PostgreSQL · DB 보안 그룹 · TLS 파라미터 그룹 (설계 6.1, 가이드 12장, #65)
-# 1단계: 다른 스택의 출력 읽기 · 2단계: TLS 파라미터 그룹. 보안 그룹 · 인스턴스는 3 · 4단계에서 더한다.
+# 1단계: 다른 스택의 출력 읽기 · 2단계: TLS 파라미터 그룹 · 3단계: DB 보안 그룹. 인스턴스는 4단계에서 더한다.
 
 data "aws_caller_identity" "current" {}
 
@@ -67,4 +67,27 @@ resource "aws_db_parameter_group" "tls" {
     value        = "1"
     apply_method = "immediate"
   }
+}
+
+# --- 3단계: DB 보안 그룹 (설계 6.1 · 5.1) ---
+
+# 안에 ingress · egress 블록을 쓰지 않는다. 규칙은 아래 별도 자원으로 둔다.
+# egress 없음: 공급자가 AWS 기본 「모두 나가기」 규칙을 지우고, DB 서브넷엔 바깥 경로도 없다. 응답은 stateful 이라 돌아간다.
+# description 을 바꾸면 보안 그룹이 교체되므로 처음부터 확정한다(영어 — #18).
+resource "aws_security_group" "db" {
+  name        = "${var.identifier}-db"
+  description = "RDS: allow 5432 only from the EKS node security group"
+  vpc_id      = local.vpc_id
+}
+
+# 출처는 IP 대역이 아니라 노드 보안 그룹 — 노드를 매일 새로 만들어 IP 가 바뀌어도 규칙은 그대로다.
+# 파드 트래픽도 노드의 네트워크 인터페이스(VPC CNI)로 나가 이 그룹에서 온 것으로 보인다. Karpenter 앱 노드도 같은 그룹을 붙인다.
+# 파드 단위 구분은 네트워크 정책(설계 5.1)과 앱별 DB 계정이 맡는다(파드별 보안 그룹은 t 계열 노드에서 못 씀).
+resource "aws_vpc_security_group_ingress_rule" "db_from_nodes" {
+  security_group_id            = aws_security_group.db.id
+  referenced_security_group_id = local.node_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  description                  = "PostgreSQL from EKS nodes (design 6.1 and 5.1)"
 }
