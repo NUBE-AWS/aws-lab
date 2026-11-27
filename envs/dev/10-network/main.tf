@@ -45,6 +45,7 @@ module "vpc" {
 }
 
 # S3 게이트웨이 엔드포인트(무료). ECR 이미지 계층 등 S3 트래픽이 NAT 를 거치지 않는다.
+# 노드 서브넷(private)의 라우팅 테이블에만 연결한다. DB 서브넷의 RDS 는 이 경로를 쓰지 않는다(설계 3.1, #43).
 # 인터페이스 엔드포인트는 시간당 과금이라 두지 않는다(설계 3.1).
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
@@ -56,7 +57,7 @@ module "vpc_endpoints" {
     s3 = {
       service         = "s3"
       service_type    = "Gateway"
-      route_table_ids = concat(module.vpc.private_route_table_ids, module.vpc.database_route_table_ids)
+      route_table_ids = module.vpc.private_route_table_ids
       tags            = { Name = "${local.name}-s3" }
     }
   }
