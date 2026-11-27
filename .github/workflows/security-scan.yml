@@ -11,11 +11,9 @@
 name: security-scan
 
 on:
+  # PR 은 경로와 관계없이 항상 돈다 — 「trivy config」가 룰셋 필수 검사라서(#34).
+  # 경로 필터가 있으면 README 만 고친 PR 에서 검사가 보고되지 않아 병합이 「Waiting for status」로 막힌다.
   pull_request:
-    paths:
-      - "envs/**"
-      - "bootstrap/**"
-      - ".github/workflows/security-scan.yml"
   # Code scanning 이 PR 결과를 main 기준과 비교하려면 main 분석이 있어야 한다.
   push:
     branches: [main]
