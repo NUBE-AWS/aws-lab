@@ -60,6 +60,28 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: true
 
+      # EKS 공개 엔드포인트 허용 주소(#36). destroy 도 변수를 모두 평가하므로 20-cluster 에 값이 필요하다.
+      # 값이 없으면 여기서는 넘어간다 — 30-data 는 먼저 지우고, 20-cluster 에 자원이 있을 때만 멈춘다.
+      # GitHub 는 Secret 전체 문자열만 가린다. Terraform 출력에는 주소가 하나씩 나오므로 주소마다 가림을 등록한다.
+      - name: 허용 주소 준비
+        env:
+          CIDRS: ${{ secrets.TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS }}
+        run: |
+          set -euo pipefail
+          [ -z "$CIDRS" ] && exit 0
+          # 형식이 틀려도 값은 찍지 않는다(jq 오류도 버림).
+          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' <<< "$CIDRS" > /dev/null 2>&1; then
+            echo '::error::Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 형식이 틀렸습니다. 예: ["x.x.x.x/32"] (값은 출력하지 않음)'; exit 1
+          fi
+          compact=$(jq -c . <<< "$CIDRS")
+          echo "::add-mask::$compact"
+          for c in $(jq -r '.[]' <<< "$CIDRS"); do
+            echo "::add-mask::$c"
+            echo "::add-mask::${c%/*}"
+          done
+          # Terraform 은 TF_VAR_<변수 이름> 을 읽는다. list 값은 JSON 형식으로 받는다.
+          echo "TF_VAR_cluster_endpoint_public_access_cidrs=$compact" >> "$GITHUB_ENV"
+
       - name: destroy
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -87,6 +109,11 @@ jobs:
             if [ ! -s "$RUNNER_TEMP/state.txt" ]; then
               echo "| \`$s\` | 자원 없음 — 건너뜀 |" >> "$GITHUB_STEP_SUMMARY"
               echo "::endgroup::"; continue
+            fi
+
+            if [ "$s" = "envs/dev/20-cluster" ] && [ -z "${TF_VAR_cluster_endpoint_public_access_cidrs:-}" ]; then
+              echo "| \`$s\` | ❌ Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 없음(#36) — 등록 뒤 다시 실행 |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 가 없어 20-cluster 를 destroy 할 수 없습니다(#36). EKS · NAT 가 남아 있습니다."; exit 1
             fi
 
             terraform -chdir="$s" destroy -auto-approve -no-color -lock-timeout=30m > "$log" 2>&1 || fail "$s" destroy

@@ -83,6 +83,28 @@ jobs:
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # EKS 공개 엔드포인트 허용 주소(#36). 값이 없으면 여기서는 넘어가고, 20-cluster 차례에 멈춘다.
+      # GitHub 는 Secret 전체 문자열만 가린다. Terraform 출력에는 주소가 하나씩 나오므로 주소마다 가림을 등록한다.
+      - name: 허용 주소 준비
+        if: steps.ready.outputs.ok == 'true' && steps.pick.outputs.stacks != ''
+        env:
+          CIDRS: ${{ secrets.TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS }}
+        run: |
+          set -euo pipefail
+          [ -z "$CIDRS" ] && exit 0
+          # 형식이 틀려도 값은 찍지 않는다(jq 오류도 버림).
+          if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' <<< "$CIDRS" > /dev/null 2>&1; then
+            echo '::error::Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 형식이 틀렸습니다. 예: ["x.x.x.x/32"] (값은 출력하지 않음)'; exit 1
+          fi
+          compact=$(jq -c . <<< "$CIDRS")
+          echo "::add-mask::$compact"
+          for c in $(jq -r '.[]' <<< "$CIDRS"); do
+            echo "::add-mask::$c"
+            echo "::add-mask::${c%/*}"
+          done
+          # Terraform 은 TF_VAR_<변수 이름> 을 읽는다. list 값은 JSON 형식으로 받는다.
+          echo "TF_VAR_cluster_endpoint_public_access_cidrs=$compact" >> "$GITHUB_ENV"
+
       - if: steps.ready.outputs.ok == 'true' && steps.pick.outputs.stacks != ''
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -119,6 +141,10 @@ jobs:
 
           for s in $STACKS; do
             echo "::group::$s"
+            if [ "$s" = "envs/dev/20-cluster" ] && [ -z "${TF_VAR_cluster_endpoint_public_access_cidrs:-}" ]; then
+              echo "| \`$s\` | ❌ Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 없음(#36) |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::Secret TF_VAR_CLUSTER_PUBLIC_ACCESS_CIDRS 가 없어 20-cluster 를 apply 할 수 없습니다(#36)."; exit 1
+            fi
             terraform -chdir="$s" init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$log" 2>&1 || fail "$s" init
 
             set +e
