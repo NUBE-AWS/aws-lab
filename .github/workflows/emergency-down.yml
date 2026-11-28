@@ -97,7 +97,12 @@ jobs:
           EOF
 
           log="$RUNNER_TEMP/tf.log"
-          fail() { echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"; tail -n 40 "$log"; exit 1; }
+          # 실패하면 Terraform 의 오류 제목 줄만 찍는다(공개 저장소 로그, 설계 7.4). 전문은 사람이 로컬에서 같은 명령으로 본다.
+          fail() {
+            echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^(│ )?Error: ' "$log" || echo "(Error: 줄 없음 — 전문은 로컬에서 같은 명령으로)"
+            exit 1
+          }
 
           { echo "### emergency-down"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
 
