@@ -53,7 +53,8 @@ data "aws_iam_policy_document" "apply_deny" {
     resources = ["*"]
   }
 
-  # CI 역할 두 개만. apply 역할이 자기 거부 문장을 지우거나, PR 에서 도는 plan 역할의 권한을 넓히지 못하게 한다.
+  # CI 역할 세 개만. apply 역할이 자기 거부 문장을 지우거나, PR 에서 도는 plan 역할 · 조회 전용 야간 점검 역할의
+  # 신뢰 조건 · 권한을 넓히지 못하게 한다(야간 점검 역할을 PR 실행까지 열고 관리자 정책을 붙이는 경로를 막음).
   # "*" 로 두면 20-cluster 의 노드 · Pod Identity 역할 정책 연결까지 거부되어 적용이 실패한다.
   statement {
     sid    = "DenyCiRoleChange"
@@ -67,7 +68,7 @@ data "aws_iam_policy_document" "apply_deny" {
       "iam:PutRolePermissionsBoundary",
       "iam:DeleteRole",
     ]
-    resources = [aws_iam_role.github_plan.arn, aws_iam_role.github_apply.arn]
+    resources = [aws_iam_role.github_plan.arn, aws_iam_role.github_apply.arn, aws_iam_role.github_nightly.arn]
   }
 
   statement {
