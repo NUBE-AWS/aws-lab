@@ -170,13 +170,15 @@ jobs:
 
       - id: init
         working-directory: ${{ matrix.stack }}
-        run: terraform init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$RUNNER_TEMP/init.log" 2>&1 || { tail -n 30 "$RUNNER_TEMP/init.log"; exit 1; }
+        run: |
+          terraform init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$RUNNER_TEMP/init.log" 2>&1 || { grep -E '^(│ )?Error: ' "$RUNNER_TEMP/init.log" || echo "(Error: 줄 없음 — 전문은 로컬에서 같은 명령으로)"; exit 1; }
 
       - id: validate
         working-directory: ${{ matrix.stack }}
         run: terraform validate -no-color
 
-      # plan 전문은 파일로만 둔다. 실패했을 때만 끝부분을 로그에 보인다(계정 ID 는 가려짐).
+      # plan 전문은 파일로만 둔다. 실패했을 때도 Terraform 오류 제목 줄(Error:)만 로그에 보인다(설계 7.4).
+      # 공개 저장소 로그는 Secret 과 글자가 같은 값만 가려지므로 끝부분을 그대로 찍지 않는다. 전문은 로컬에서 같은 명령으로.
       - id: plan
         working-directory: ${{ matrix.stack }}
         run: |
@@ -185,7 +187,7 @@ jobs:
           rc=$?
           set -e
           # 0 = 변경 없음, 2 = 변경 있음, 1 = 오류
-          if [ "$rc" -eq 1 ]; then tail -n 40 "$RUNNER_TEMP/plan.log"; exit 1; fi
+          if [ "$rc" -eq 1 ]; then grep -E '^(│ )?Error: ' "$RUNNER_TEMP/plan.log" || echo "(Error: 줄 없음 — 전문은 로컬에서 같은 명령으로)"; exit 1; fi
           terraform show -json tfplan > "$RUNNER_TEMP/plan.json"
 
       # 스택 하나의 요약을 만든다. 실패해도 「어느 단계에서 실패」를 남긴다.

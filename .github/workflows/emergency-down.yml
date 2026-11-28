@@ -4,8 +4,10 @@
 # - 순서: 30-data → 20-cluster → 10-network. 상태가 비어 있는 스택은 건너뛴다.
 # - 00-foundation 은 지우지 않는다(OIDC 역할이 없어지면 다음 CI 가 AWS 에 로그인하지 못한다. 거의 무료).
 # - 승인 단계는 없다(사용자 결정). 대신 main 에서만, DOWN 을 정확히 입력해야 돈다.
-# - Argo CD 루트 Application(25-addons) 이 생긴 뒤에는 그것을 먼저 지워야 한다(ALB 등 클러스터가 만든 자원).
-#   그 단계가 오면 이 워크플로에 앞 단계를 추가한다.
+# - 맨 앞에서 25-addons(Argo CD · 루트 Application, 상태 key dev/addons)의 상태를 본다(설계 7.4).
+#   자원이 남아 있으면 아무것도 지우지 않고 멈춘다 — 클러스터가 만든 자원(ALB · EBS · Karpenter EC2)은
+#   클러스터 안에서 컨트롤러가 지워야 하는데 CI 는 클러스터 API 에 닿지 않는다. 사람이 설계 8.3 1항을 먼저 한다.
+#   디렉터리가 아직 없으면 「25-addons 없음」으로 요약에 남기고 계속한다.
 
 name: emergency-down
 
@@ -95,9 +97,33 @@ jobs:
           EOF
 
           log="$RUNNER_TEMP/tf.log"
-          fail() { echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"; tail -n 40 "$log"; exit 1; }
+          # 실패하면 Terraform 의 오류 제목 줄만 찍는다(공개 저장소 로그, 설계 7.4). 전문은 사람이 로컬에서 같은 명령으로 본다.
+          fail() {
+            echo "| \`$1\` | ❌ $2 실패 |" >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^(│ )?Error: ' "$log" || echo "(Error: 줄 없음 — 전문은 로컬에서 같은 명령으로)"
+            exit 1
+          }
 
           { echo "### emergency-down"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
+
+          # 25-addons 가 남아 있으면 아무것도 지우지 않는다(설계 7.4 · 8.3 1항). 읽기만 한다(destroy 하지 않음).
+          # state list 가 실패하면(인증 · 잠금 · 백엔드 오류) 「자원 없음」으로 착각하지 않도록 실패로 멈춘다.
+          addons=envs/dev/25-addons
+          echo "::group::$addons"
+          if [ ! -d "$addons" ]; then
+            echo "| \`$addons\` | 25-addons 없음 — 확인 생략 |" >> "$GITHUB_STEP_SUMMARY"
+            echo "25-addons 없음"
+          else
+            terraform -chdir="$addons" init -backend-config="$RUNNER_TEMP/backend.hcl" -no-color > "$log" 2>&1 || fail "$addons" init
+            terraform -chdir="$addons" state list > "$RUNNER_TEMP/state.txt" 2> "$log" || fail "$addons" "state list"
+            if [ -s "$RUNNER_TEMP/state.txt" ]; then
+              echo "| \`$addons\` | ⛔ 자원이 남아 있음 — 아무것도 지우지 않고 멈춤. 설계 8.3 1항을 사람이 먼저 |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::25-addons 에 자원이 남아 있습니다. 설계 8.3 1항(루트 자동 동기화 끄기 → 업무 앱 → Gateway → NodePool → 컨트롤러 → 25-addons destroy)을 사람이 먼저 한 뒤 다시 실행합니다."
+              exit 1
+            fi
+            echo "| \`$addons\` | 자원 없음 — 계속 |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "::endgroup::"
 
           for s in envs/dev/30-data envs/dev/20-cluster envs/dev/10-network; do
             echo "::group::$s"

@@ -3,7 +3,7 @@
 # - 대상은 envs/dev 의 00 · 10 · 20 · 30. bootstrap(상태 버킷) · 25-addons(클러스터 API) 는 사람이 한다.
 # - 순서는 번호순(00 → 10 → 20 → 30). 한 job 안에서 차례로 돌려 순서를 보장하고, 앞이 실패하면 멈춘다.
 # - AWS 인증은 OIDC → GitHubActionsApply(main 브랜치만 받을 수 있음, 00-foundation/github-oidc.tf).
-# - 공개 저장소라 plan · apply 전문은 로그에 남기지 않는다(파일로만 두고 실패 때 끝부분만).
+# - 공개 저장소라 plan · apply 전문은 로그에 남기지 않는다(파일로만 두고 실패 때 Terraform 오류 제목 줄(Error:)만, 설계 7.4).
 #
 # 병합(push) — 켜져 있는 스택만 맞춘다(#41 결정):
 # - 00-foundation 은 매번 plan 한다(늘 켜 두는 스택, 겹친 병합으로 빠진 변경을 다시 잡음). 10 · 20 · 30 은 바뀐 경우만.
@@ -162,7 +162,9 @@ jobs:
             if [ "$1" = "envs/dev/00-foundation" ] && grep -q 'AccessDenied' "$log"; then
               echo "> 00-foundation 이 \`AccessDenied\` 로 실패했습니다 — CI 로 적용되지 않는 변경(CI 역할 · 거부 문장 · CloudTrail · GuardDuty)이 main 에 있고 아직 사람이 apply 하지 않았습니다. 로컬에서 00-foundation 을 apply 하면 다음 실행부터 풀립니다(README 「CI로 적용되지 않는 변경」)." >> "$GITHUB_STEP_SUMMARY"
             fi
-            tail -n 40 "$log"; exit 1
+            # 오류 제목 줄만 찍는다(공개 저장소 로그). 전문은 사람이 로컬에서 같은 명령으로 본다.
+            grep -E '^(│ )?Error: ' "$log" || echo "(Error: 줄 없음 — 전문은 로컬에서 같은 명령으로)"
+            exit 1
           }
 
           { echo "### terraform apply ($EVENT)"; echo; echo "| 스택 | 결과 |"; echo "| :-- | :-- |"; } >> "$GITHUB_STEP_SUMMARY"
