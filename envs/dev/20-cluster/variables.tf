@@ -46,5 +46,14 @@ variable "addon_versions" {
     kube-proxy             = "v1.37.0-eksbuild.39"
     eks-pod-identity-agent = "v1.4.1-eksbuild.3"
     aws-ebs-csi-driver     = "v1.68.1-eksbuild.1"
+    # 자리표시(미확인) — 판을 조회하지 못했다. 병합 전에 사람이 아래로 조회해 바꾼다:
+    #   aws eks describe-addon-versions --addon-name metrics-server --kubernetes-version 1.37     #     --query 'addons[0].addonVersions[?compatibilities[0].defaultVersion].addonVersion'
+    # 아래 validation 이 이 값을 막아 바꾸기 전에는 plan 이 실패한다(잘못된 판으로 병합 · 적용되지 않게).
+    metrics-server = "PLACEHOLDER-metrics-server-version"
+  }
+
+  validation {
+    condition     = alltrue([for k, v in var.addon_versions : !startswith(v, "PLACEHOLDER")])
+    error_message = "addon_versions 에 자리표시(PLACEHOLDER) 판이 남아 있습니다. describe-addon-versions 로 조회한 판을 넣습니다."
   }
 }

@@ -142,6 +142,17 @@ module "eks" {
         service_account = local.ebs_csi_service_account
       }]
     }
+    # kubectl top · HPA 용 자원 지표(설계 3.2). EKS 커뮤니티 애드온이라 다른 애드온과 같은 방식으로 설치한다.
+    # 25-addons(Argo CD)보다 먼저 있어야 시스템 노드 자원을 kubectl top 으로 확인할 수 있다(#76).
+    # 시스템 노드의 테인트를 견디게 한다 — coredns 와 같은 형식. 단, 이 애드온의 설정 스키마에
+    # tolerations 키가 있는지는 아직 조회하지 않았다(미확인: aws eks describe-addon-configuration
+    # --addon-name metrics-server --addon-version <판> 으로 확인. 키가 없으면 apply 가 설정 오류로 실패한다).
+    metrics-server = {
+      addon_version = var.addon_versions["metrics-server"]
+      configuration_values = jsonencode({
+        tolerations = [{ key = "CriticalAddonsOnly", operator = "Exists" }]
+      })
+    }
   }
 
   # 사람의 액세스 항목 — 대상은 access.tf(IAM 그룹 aws-lab-admins 멤버, #50).
